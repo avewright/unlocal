@@ -1,0 +1,13 @@
+{
+  "name": "@unlocal/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "unlocal": "./bin/unlocal.js"
+  },
+  "dependencies": {
+    "@unlocal/core": "workspace:*",
+    "@unlocal/console": "workspace:*"
+  }
+}

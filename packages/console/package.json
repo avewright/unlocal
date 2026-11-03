@@ -1,0 +1,8 @@
+{
+  "name": "@unlocal/console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/server.ts" },
+  "dependencies": { "@unlocal/core": "workspace:*" }
+}

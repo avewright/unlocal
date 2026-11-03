@@ -1,0 +1,11 @@
+{
+  "project": "fullstack-demo",
+  "cloud": "aws",
+  "region": "us-east-1",
+  "budget": { "monthlyUsd": 75, "alertAtPercent": 80 },
+  "resources": {
+    "web": { "type": "site", "path": "./web/dist", "spa": true, "domain": "demo.example.com" },
+    "api": { "type": "service", "source": "./api", "port": 8080, "cpu": 0.25, "memoryGb": 0.5, "instances": 1 },
+    "db": { "type": "postgres", "size": "small", "storageGb": 20 }
+  }
+}

@@ -1,0 +1,5 @@
+# unlocal
+
+> Let AI agents deploy apps (sites, services, Postgres) with a hard monthly spending limit they can't break. One account-wide cap across every project; a human sets it, agents can't raise it.
+
+- [Agent contract](/agent-contract.md): JSON output, error codes, exit statuses, and the plan → apply loop.

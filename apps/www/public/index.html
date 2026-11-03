@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>unlocal</title>
+<meta name="description" content="Let AI agents deploy your apps with a hard monthly spending limit they can't break.">
+<meta name="theme-color" content="#f5f7fa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0d14" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f7fa;
+    --panel: #ffffff;
+    --fg: #111827;
+    --muted: #6b7487;
+    --ok: #16a34a;
+    --err: #dc2626;
+    --line: color-mix(in srgb, var(--fg) 8%, transparent);
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0d14;
+      --panel: #11141c;
+      --fg: #eef0f5;
+      --muted: #7a8296;
+      --ok: #4cc38a;
+      --err: #e5484d;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.5 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 20px; }
+  header { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+  header a { color: var(--muted); text-decoration: none; transition: color 150ms var(--ease); }
+  header a:hover, header a:focus-visible { color: var(--fg); }
+  header .mark { color: var(--fg); font-size: 16px; font-weight: 600; }
+  h1 {
+    margin: 128px 0 48px;
+    font-size: clamp(40px, 8vw, 64px);
+    font-weight: 500;
+    line-height: 1.04;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  h1 span { color: var(--muted); }
+  pre {
+    margin: 0 0 128px;
+    padding: 24px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    font: 13px/1.7 var(--mono);
+    white-space: pre-wrap;
+  }
+  @media (max-width: 520px) {
+    h1 { margin: 64px 0 32px; }
+    pre { margin-bottom: 64px; padding: 16px; font-size: 12px; border-radius: 12px; }
+  }
+  .p, .d { color: var(--muted); }
+  .p { user-select: none; }
+  .ok { color: var(--ok); }
+  .err { color: var(--err); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="mark" href="/">unlocal</a>
+    <a href="/agent-contract.md">Docs</a>
+  </header>
+  <main>
+    <h1>Your agent ships the app.<br><span>You set the limit.</span></h1>
+    <pre><code><span class="p">$ </span>unlocal cap
+Cap $25.00/mo
+
+  waitlist-api  gcp     $15.90/mo
+  recipes       gcp      $0.50/mo
+  portfolio     aws      $0.28/mo
+
+  $16.68/mo live · $8.32 left
+
+<span class="p">$ </span>unlocal apply --yes
+<span class="err">error [CAP_EXCEEDED]</span>: all projects would cost $45.04/mo, over the $25.00/mo cap
+<span class="d">hint: shrink resources, or a human raises it with `unlocal cap &lt;usd&gt;`</span></code></pre>
+  </main>
+</div>
+</body>
+</html>

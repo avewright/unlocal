@@ -1,0 +1,4 @@
+node_modules/
+.unlocal/
+*.plan.json
+.DS_Store

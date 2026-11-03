@@ -1,0 +1,19 @@
+{
+  "name": "unlocal",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "unlocal": "node packages/cli/bin/unlocal.js",
+    "test": "node --test \"packages/*/test/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "pnpm typecheck && pnpm test",
+    "www": "node apps/www/serve.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

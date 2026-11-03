@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>unlocal console</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f7fa;
+    --panel: #ffffff;
+    --raised: #eceff4;
+    --fg: #111827;
+    --muted: #6b7487;
+    --ok: #16a34a;
+    --err: #dc2626;
+    --line: color-mix(in srgb, var(--fg) 8%, transparent);
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0d14;
+      --panel: #11141c;
+      --raised: #1a1e28;
+      --fg: #eef0f5;
+      --muted: #7a8296;
+      --ok: #4cc38a;
+      --err: #e5484d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/20px var(--sans); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 20px 96px; }
+  header { display: flex; align-items: center; gap: 16px; height: 64px; }
+  header .mark { font-size: 16px; font-weight: 600; margin-right: auto; }
+  a { color: inherit; }
+  .muted { color: var(--muted); }
+  .num { font-variant-numeric: tabular-nums; }
+  .err { color: var(--err); }
+  .ok { color: var(--ok); }
+
+  button, input {
+    font: inherit; color: inherit; height: 36px; border-radius: 8px; border: 1px solid var(--line);
+    transition: background-color 150ms var(--ease), opacity 150ms var(--ease);
+  }
+  input { background: var(--raised); padding: 0 12px; min-width: 0; }
+  input:focus-visible, button:focus-visible { outline: 2px solid color-mix(in srgb, var(--fg) 40%, transparent); outline-offset: 1px; }
+  button { background: var(--raised); padding: 0 16px; cursor: pointer; white-space: nowrap; }
+  button.primary { background: var(--fg); color: var(--bg); border-color: transparent; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button.link { background: none; border: 0; padding: 0; height: auto; color: var(--muted); }
+  button.link:hover { color: var(--fg); }
+
+  form.row { display: flex; gap: 8px; }
+  form.row input { flex: 1; }
+
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 32px 0 48px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; display: grid; gap: 12px; }
+  .stat .label { color: var(--muted); }
+  .stat .value { font-size: 32px; line-height: 1; font-weight: 500; letter-spacing: -0.02em; }
+  .stat form input { width: 100%; }
+
+  h2 { font-size: 14px; font-weight: 500; margin: 0 0 12px; }
+  .list { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; margin-bottom: 48px; }
+  .item { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border-top: 1px solid var(--line); }
+  .item:first-child { border-top: 0; }
+  .item .main { flex: 1; min-width: 0; }
+  .item .main > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .name { font-weight: 500; }
+  .list form.row { padding: 12px 16px; border-top: 1px solid var(--line); }
+  .list .item:only-child + form.row, .list form.row:first-child { border-top: 0; }
+
+  .login { width: min(320px, calc(100vw - 32px)); margin: 0 auto; padding-top: 24vh; display: flex; flex-direction: column; gap: 12px; }
+  .login .logo { width: 40px; height: 40px; margin: 0 auto 20px; }
+  .login h1 { margin: 0 0 24px; font-size: 20px; line-height: 28px; font-weight: 500; letter-spacing: -0.01em; text-align: center; }
+  .login input, .login button { height: 44px; width: 100%; }
+  .login input { background: var(--panel); }
+  .login .who { background: none; border: 0; height: auto; padding: 0 0 8px; color: var(--muted); }
+  .login .who:hover { color: var(--fg); }
+  .login .err:empty { display: none; }
+  .login .err { text-align: center; }
+
+  dialog { width: min(560px, calc(100vw - 32px)); border: 1px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--fg); padding: 24px; }
+  dialog:focus { outline: none; }
+  dialog::backdrop { background: color-mix(in srgb, #000 40%, transparent); }
+  dialog h3 { margin: 0 0 16px; font-size: 16px; font-weight: 500; }
+  dialog pre { margin: 0 0 16px; padding: 16px; background: var(--raised); border-radius: 10px; font: 12.5px/1.7 var(--mono); white-space: pre-wrap; }
+  dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+  @media (max-width: 560px) {
+    .stats { grid-template-columns: 1fr; }
+    .item { flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<dialog id="plan"></dialog>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

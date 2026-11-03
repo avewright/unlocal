@@ -1,0 +1,7 @@
+{
+  "project": "unlocal-www",
+  "budget": { "monthlyUsd": 5 },
+  "resources": {
+    "www": { "type": "site", "path": "./public" }
+  }
+}
