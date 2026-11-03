@@ -223,6 +223,12 @@ export function parseConfig(raw: unknown): ProjectConfig {
         continue;
       }
       const type = c.oneOf(value, "type", base, RESOURCE_TYPES);
+      const info = CLOUDS_INFO[cloud];
+      if (type && !info.native[type]) {
+        const offered = RESOURCE_TYPES.filter((t) => info.native[t]).map((t) => `${t}s`).join(", ");
+        c.add(`${base}.type`, `${info.name} hosts only ${offered}; put this ${type} in a project on another cloud`);
+        continue;
+      }
       if (type === "site") resources[name] = parseSite(c, value, base);
       else if (type === "service") resources[name] = parseService(c, value, base);
       else if (type === "postgres") resources[name] = parsePostgres(c, value, base);

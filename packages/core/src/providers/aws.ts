@@ -30,7 +30,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 import { UnlocalError } from "../errors.ts";
-import { listSiteFiles } from "../files.ts";
+import { contentTypeFor, listSiteFiles } from "../files.ts";
 import type { Outputs } from "../state.ts";
 import type { ResourceSpec, SiteSpec } from "../types.ts";
 import type { Provider, ProviderContext } from "./provider.ts";
@@ -42,33 +42,6 @@ import type { Provider, ProviderContext } from "./provider.ts";
  */
 
 const CACHING_OPTIMIZED_POLICY = "658327ea-f89d-4fab-a63d-7e88639e58f6";
-
-const CONTENT_TYPES: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".mjs": "text/javascript; charset=utf-8",
-  ".json": "application/json",
-  ".map": "application/json",
-  ".txt": "text/plain; charset=utf-8",
-  ".md": "text/plain; charset=utf-8",
-  ".xml": "application/xml",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-  ".avif": "image/avif",
-  ".ico": "image/x-icon",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".pdf": "application/pdf",
-  ".wasm": "application/wasm",
-  ".webmanifest": "application/manifest+json",
-};
-
-export const contentTypeFor = (key: string) => CONTENT_TYPES[path.extname(key).toLowerCase()] ?? "application/octet-stream";
 
 /** Pages and text revalidate on every request so deploys show up immediately; assets cache for an hour. */
 export const cacheControlFor = (key: string) =>

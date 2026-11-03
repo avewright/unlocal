@@ -24,8 +24,10 @@ export const PLATFORM_FEE_RATE = 0.1;
 
 export const round2 = (n: number) => Math.round(n * 100) / 100;
 
+/** Assumes validation already rejected resource types the cloud doesn't offer. */
 function cloudLineItems(spec: ResourceSpec, cloud: Cloud): LineItem[] {
   const { native, rates } = CLOUDS_INFO[cloud];
+  if (!native[spec.type]) throw new Error(`${cloud} doesn't offer ${spec.type}`);
   const dns = (domain: string | undefined): LineItem[] =>
     domain ? [{ description: `DNS zone for ${domain}`, monthlyUsd: rates.site.dnsZoneMonth }] : [];
 
@@ -36,7 +38,7 @@ function cloudLineItems(spec: ResourceSpec, cloud: Cloud): LineItem[] {
         ...dns(spec.domain),
       ];
     case "service": {
-      const r = rates.service;
+      const r = rates.service!;
       const { cpu, memoryGb } = r.shape ? r.shape(spec.cpu, spec.memoryGb) : spec;
       const perInstance = (cpu * r.vcpuHour + memoryGb * r.gbHour + r.instanceHour) * HOURS_PER_MONTH;
       const items: LineItem[] = [
@@ -54,9 +56,9 @@ function cloudLineItems(spec: ResourceSpec, cloud: Cloud): LineItem[] {
       return [
         {
           description: `${native.postgres}: ${spec.size}${ha}`,
-          monthlyUsd: rates.postgres.instanceHour[spec.size] * HOURS_PER_MONTH * copies,
+          monthlyUsd: rates.postgres!.instanceHour[spec.size] * HOURS_PER_MONTH * copies,
         },
-        { description: `${spec.storageGb} GB storage${ha}`, monthlyUsd: spec.storageGb * rates.postgres.storageGbMonth * copies },
+        { description: `${spec.storageGb} GB storage${ha}`, monthlyUsd: spec.storageGb * rates.postgres!.storageGbMonth * copies },
       ];
     }
   }

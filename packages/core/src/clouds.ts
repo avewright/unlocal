@@ -5,12 +5,12 @@ import type { PostgresSize, ResourceType } from "./types.ts";
  * adding a cloud means adding one entry to CLOUDS_INFO (plus, later, its provider).
  */
 
-export const CLOUDS = ["aws", "gcp", "azure", "oci"] as const;
+export const CLOUDS = ["aws", "gcp", "azure", "oci", "cloudflare"] as const;
 export type Cloud = (typeof CLOUDS)[number];
 
 export interface CloudRates {
   site: { hostingMonth: number; dnsZoneMonth: number };
-  service: {
+  service?: {
     vcpuHour: number;
     gbHour: number;
     /** Per-instance fixed cost (e.g. a public IPv4 address). */
@@ -20,7 +20,7 @@ export interface CloudRates {
     /** Round a requested shape up to one the platform actually bills. */
     shape?: (cpu: number, memoryGb: number) => { cpu: number; memoryGb: number };
   };
-  postgres: { instanceHour: Record<PostgresSize, number>; storageGbMonth: number };
+  postgres?: { instanceHour: Record<PostgresSize, number>; storageGbMonth: number };
 }
 
 export interface CloudInfo {
@@ -28,8 +28,8 @@ export interface CloudInfo {
   defaultRegion: string;
   /** Supported regions → price multiplier relative to defaultRegion. */
   regions: Record<string, number>;
-  /** The managed service each unlocal resource type becomes on this cloud. */
-  native: Record<ResourceType, string>;
+  /** The managed service each unlocal resource type becomes on this cloud. Missing: not offered here. */
+  native: Partial<Record<ResourceType, string>>;
   /** On-demand list prices in USD for defaultRegion. */
   rates: CloudRates;
 }
@@ -93,6 +93,17 @@ export const CLOUDS_INFO: Record<Cloud, CloudInfo> = {
       service: { vcpuHour: 0.0125, gbHour: 0.0015, instanceHour: 0, ingressHour: 0.0123 },
       // OCI Database with PostgreSQL: unverified. Oracle publishes rates only via its estimator.
       postgres: { instanceHour: { small: 0.098, medium: 0.196, large: 0.392 }, storageGbMonth: 0.075 },
+    },
+  },
+  cloudflare: {
+    name: "Cloudflare",
+    // Served from Cloudflare's whole network; there's no region to pick.
+    defaultRegion: "global",
+    regions: { global: 1 },
+    native: { site: "Workers static assets" },
+    rates: {
+      // Workers Free: static asset requests are free and unlimited; DNS is free.
+      site: { hostingMonth: 0, dnsZoneMonth: 0 },
     },
   },
 };

@@ -12,6 +12,34 @@ export interface SiteFile {
   size: number;
 }
 
+/** Content types for the files a static site serves. */
+const CONTENT_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".json": "application/json",
+  ".map": "application/json",
+  ".txt": "text/plain; charset=utf-8",
+  ".md": "text/plain; charset=utf-8",
+  ".xml": "application/xml",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".pdf": "application/pdf",
+  ".wasm": "application/wasm",
+  ".webmanifest": "application/manifest+json",
+};
+
+export const contentTypeFor = (key: string) => CONTENT_TYPES[path.extname(key).toLowerCase()] ?? "application/octet-stream";
+
 /** Caution limits for a static site: anything bigger is almost certainly a mistake (e.g. node_modules). */
 const MAX_FILES = 10_000;
 const MAX_BYTES = 1024 ** 3;
