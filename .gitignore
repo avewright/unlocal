@@ -4,3 +4,4 @@ node_modules/
 *.plan.json
 .DS_Store
 .pnpm-store/
+build/

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "packages",
+    "outDir": "build/npm/lib"
+  },
+  "include": ["packages/core/src/**/*.ts", "packages/cli/src/**/*.ts", "packages/console/src/**/*.ts"]
+}

@@ -17,7 +17,7 @@ Checked items are done and committed. Who: **O** = Opus (core, CLI, console), **
 ## Next: anyone can use it
 
 - [x] **O** `up` builds the app itself: detect Vite, Astro, Next static export, plain HTML; run the build; deploy the output
-- [ ] **O** npm package ready: `npx unlocal up` and `npx unlocal mcp` work from any folder
+- [x] **O** npm package ready: `npx unlocal up` and `npx unlocal mcp` work from any folder
 - [ ] **you** Publish to npm (needs your npm account)
 - [ ] **you** Pick and buy the free-link domain (e.g. `unlocal.app`) and add it to Cloudflare
 - [ ] **C** Hosted API: tenants, hashed tokens, encrypted cloud credentials, `POST /v1/deploy`, `GET /v1/usage`, a deploy queue per project

@@ -11,7 +11,8 @@
     "test": "node --test \"packages/*/test/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json",
     "check": "pnpm typecheck && pnpm test",
-    "www": "node apps/www/serve.ts"
+    "www": "node apps/www/serve.ts",
+    "pack:npm": "node scripts/pack.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

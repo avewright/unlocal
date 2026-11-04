@@ -26,3 +26,13 @@ jobs:
           cp -R examples/fullstack/. "$work"
           pnpm --silent unlocal --dir "$work" plan --json > /dev/null
           pnpm --silent unlocal --dir "$work" up --sim --json > /dev/null
+      # What `npx unlocal` runs: the compiled package, installed outside the repo.
+      - name: Build and try the npm package
+        run: |
+          set -euo pipefail
+          node scripts/pack.ts
+          dest="$(mktemp -d)"
+          (cd build/npm && npm pack --pack-destination "$dest" --silent)
+          cd "$dest" && npm init -y > /dev/null && npm install --silent --no-audit --no-fund ./unlocal-*.tgz
+          mkdir site && echo '<h1>hi</h1>' > site/index.html
+          UNLOCAL_HOME="$dest/home" npx unlocal --dir site up --sim --json > /dev/null
