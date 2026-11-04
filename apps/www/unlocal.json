@@ -1,5 +1,6 @@
 {
   "project": "unlocal-www",
+  "cloud": "cloudflare",
   "budget": { "monthlyUsd": 5 },
   "resources": {
     "www": { "type": "site", "path": "./public" }

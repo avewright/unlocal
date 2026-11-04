@@ -6,6 +6,7 @@
     "node": ">=23.6"
   },
   "scripts": {
+    "dev": "node apps/www/serve.ts",
     "unlocal": "node packages/cli/bin/unlocal.js",
     "test": "node --test \"packages/*/test/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json",

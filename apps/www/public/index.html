@@ -1,101 +1,65 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>unlocal</title>
-<meta name="description" content="Let AI agents deploy your apps with a hard monthly spending limit they can't break.">
-<meta name="theme-color" content="#f5f7fa" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0b0d14" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
-<style>
-  :root {
-    color-scheme: light dark;
-    --bg: #f5f7fa;
-    --panel: #ffffff;
-    --fg: #111827;
-    --muted: #6b7487;
-    --ok: #16a34a;
-    --err: #dc2626;
-    --line: color-mix(in srgb, var(--fg) 8%, transparent);
-    --ease: cubic-bezier(0.22, 1, 0.36, 1);
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0b0d14;
-      --panel: #11141c;
-      --fg: #eef0f5;
-      --muted: #7a8296;
-      --ok: #4cc38a;
-      --err: #e5484d;
-    }
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--fg);
-    font: 15px/1.5 var(--sans);
-    -webkit-font-smoothing: antialiased;
-  }
-  .wrap { max-width: 720px; margin: 0 auto; padding: 0 20px; }
-  header { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-  header a { color: var(--muted); text-decoration: none; transition: color 150ms var(--ease); }
-  header a:hover, header a:focus-visible { color: var(--fg); }
-  header .mark { color: var(--fg); font-size: 16px; font-weight: 600; }
-  h1 {
-    margin: 128px 0 48px;
-    font-size: clamp(40px, 8vw, 64px);
-    font-weight: 500;
-    line-height: 1.04;
-    letter-spacing: -0.03em;
-    text-wrap: balance;
-  }
-  h1 span { color: var(--muted); }
-  pre {
-    margin: 0 0 128px;
-    padding: 24px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    font: 13px/1.7 var(--mono);
-    white-space: pre-wrap;
-  }
-  @media (max-width: 520px) {
-    h1 { margin: 64px 0 32px; }
-    pre { margin-bottom: 64px; padding: 16px; font-size: 12px; border-radius: 12px; }
-  }
-  .p, .d { color: var(--muted); }
-  .p { user-select: none; }
-  .ok { color: var(--ok); }
-  .err { color: var(--err); }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#447bce">
+  <meta name="description" content="Cloud infrastructure for AI agents, with a hard spending limit.">
+  <title>unlocal</title>
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/sky.jpg" as="image">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="alternate" href="llms.txt" type="text/plain" title="Information for agents">
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <a class="mark" href="/">unlocal</a>
-    <a href="/agent-contract.md">Docs</a>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Unlocal home">unlocal</a>
+    <nav aria-label="Main navigation"><a href="agent-contract.md">Docs <span aria-hidden="true">↗</span></a></nav>
   </header>
-  <main>
-    <h1>Your agent ships the app.<br><span>You set the limit.</span></h1>
-    <pre><code><span class="p">$ </span>unlocal cap
+  <main id="main">
+    <section class="sky-hero">
+      <img class="flying-house" src="assets/flying-house-v3.png" width="1536" height="1024" alt="" aria-hidden="true" decoding="async">
+      <div class="hero-content">
+        <h1 class="dream-word">unlocal</h1>
+        <p class="hero-description">Cloud infrastructure for AI agents.<br>You set the spending limit.</p>
+        <a class="button" href="#start">Get started <span aria-hidden="true">↓</span></a>
+      </div>
+    </section>
+
+    <section class="band" aria-labelledby="cap-title">
+      <h2 id="cap-title">The agent asks. The cap answers.</h2>
+      <pre class="terminal"><code><span class="p">$ </span>unlocal cap
 Cap $25.00/mo
 
-  waitlist-api  gcp     $15.90/mo
-  recipes       gcp      $0.50/mo
-  portfolio     aws      $0.28/mo
+  waitlist-api  gcp         $16.18/mo
+  recipes       gcp          $0.28/mo
+  portfolio     cloudflare   $0.00/mo
 
-  $16.68/mo live · $8.32 left
+  $16.46/mo live · $8.54 left
 
 <span class="p">$ </span>unlocal apply --yes
-<span class="err">error [CAP_EXCEEDED]</span>: all projects would cost $45.04/mo, over the $25.00/mo cap
+<span class="err">error [CAP_EXCEEDED]</span>: all projects would cost $60.72/mo, over the $25.00/mo cap
 <span class="d">hint: shrink resources, or a human raises it with `unlocal cap &lt;usd&gt;`</span></code></pre>
+    </section>
+
+    <section class="band" aria-label="How it works">
+      <ul class="rules">
+        <li><h3>Priced before it runs</h3><p>Every change shows its monthly cost first. Nothing is created until the plan is approved.</p></li>
+        <li><h3>One cap for everything</h3><p>All your projects share one monthly limit. Raising it takes you, at a keyboard.</p></li>
+        <li><h3>Built for agents</h3><p>One JSON answer per command, stable error codes, and no prompts to get stuck on.</p></li>
+      </ul>
+    </section>
+
+    <section class="band" id="start" aria-labelledby="start-title">
+      <h2 id="start-title">Start</h2>
+      <pre class="terminal"><code><span class="p">$ </span>unlocal init --cloud cloudflare
+<span class="p">$ </span>unlocal plan
+<span class="p">$ </span>unlocal apply --yes</code></pre>
+      <p class="links"><a href="agent-contract.md">Agent contract</a><a href="llms.txt">llms.txt</a></p>
+    </section>
   </main>
-</div>
+
+  <footer class="site-footer">unlocal</footer>
 </body>
 </html>
