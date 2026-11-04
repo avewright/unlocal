@@ -273,10 +273,13 @@ describe("unlocal up (localhost to live)", () => {
     assert.equal(r.body.error.code, "APPROVAL_REQUIRED");
   });
 
-  it("still needs the human's cap for a real deploy", () => {
-    const dir = folder({ "dist/index.html": "<h1>hi</h1>" });
-    assert.equal(cli(dir, ["up"], {}, { sim: false }).body.error.code, "CAP_NOT_SET");
-    assert.equal(existsSync(path.join(dir, "unlocal.json")), false, "the folder is left as it was");
+  it("deploys free sites with no setup, but needs the human's cap for anything that costs money", () => {
+    const offline = { CLOUDFLARE_API_TOKEN: "", CLOUDFLARE_ACCOUNT_ID: "", CLOUDFLARE_API_BASE: "http://127.0.0.1:9" };
+    const free = folder({ "dist/index.html": "<h1>hi</h1>" });
+    assert.equal(cli(free, ["up"], offline, { sim: false }).body.error.code, "CLOUD_AUTH", "past the cap check, on to credentials");
+    const paid = folder({ "dist/index.html": "<h1>hi</h1>" });
+    assert.equal(cli(paid, ["up", "--cloud", "aws"], offline, { sim: false }).body.error.code, "CAP_NOT_SET");
+    assert.equal(existsSync(path.join(paid, "unlocal.json")), false, "the folder is left as it was");
   });
 
   it("lets anyone lower the cap, since that only reduces risk", () => {

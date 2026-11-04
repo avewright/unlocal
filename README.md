@@ -45,8 +45,10 @@ See [docs/agent-contract.md](docs/agent-contract.md) for the full contract.
 
 Early prototype. **Static sites deploy for real** on Cloudflare (Workers static assets, free) and AWS (S3 + CloudFront). Everything else (services, Postgres, custom domains, other clouds) runs with `--sim` and fails with `PROVIDER_UNAVAILABLE` live, before any change is made. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+Free deploys ($0, a site on Cloudflare) need no setup. Anything that costs money needs a cap a human sets.
+
 What the cap does and doesn't do today:
-- Spend is estimated from list prices, not metered from the cloud's bill. Traffic, egress and requests aren't counted yet.
+- Spend is the priced plan plus usage the cloud measures (Cloudflare Worker requests for services; static sites are free). Egress, storage growth and other clouds' usage aren't measured yet.
 - The cap, wallet and guard are local files and processes. They stop a cooperative or confused agent: raising the cap or unfreezing needs a typed confirmation at a real terminal. An agent determined to edit `~/.unlocal` by hand isn't stopped. That takes the hosted account, still to come.
 - The guard runs while `unlocal console` is open, or when `unlocal guard` runs. Nothing watches spend while neither is running.
 

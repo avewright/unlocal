@@ -155,7 +155,14 @@ export async function pauseLiveProjects(env: NodeJS.ProcessEnv): Promise<PausedP
 
 /** Swap each site and service for its paused form, saving state after every one. */
 async function pauseInPlace(p: OpenProject, pause: NonNullable<Provider["pause"]>): Promise<Pick<PausedProject, "stopped" | "kept" | "how">> {
-  const state = structuredClone(p.state);
+  // Same lock as apply, and the state as it is now, so a pause never overwrites a newer deploy.
+  return withLock(statePath(p.dir), async () => {
+    const state = await loadState(p.dir, p.config.project);
+    return pauseState(p, state, pause);
+  }, { what: `project "${p.config.project}"`, waitMs: 30_000, staleMs: 60_000 });
+}
+
+async function pauseState(p: OpenProject, state: ProjectState, pause: NonNullable<Provider["pause"]>): Promise<Pick<PausedProject, "stopped" | "kept" | "how">> {
   const stopped: string[] = [];
   const kept: string[] = [];
   for (const [name, r] of Object.entries(state.resources)) {

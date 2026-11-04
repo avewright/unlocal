@@ -10,7 +10,7 @@ How AI agents (and scripts) should drive unlocal. These guarantees are versioned
 2. **Branch on `error.code` and the exit status**, never on message text.
 3. **unlocal never prompts.** Anything that needs consent fails with a code and a `hint` saying what to do.
 4. `unlocal help --json` lists commands, flags and exit codes.
-5. `--sim` runs apply/destroy against a simulated cloud. Without it, apply spends real money, so it needs an account-wide cap (`CAP_NOT_SET` / `CAP_EXCEEDED`), and anything the cloud's provider can't do yet fails with `PROVIDER_UNAVAILABLE` before any change is made.
+5. `--sim` runs apply/destroy against a simulated cloud. Without it, apply deploys for real: anything that costs money needs an account-wide cap (`CAP_NOT_SET` / `CAP_EXCEEDED`); $0 deploys don't, and anything the cloud's provider can't do yet fails with `PROVIDER_UNAVAILABLE` before any change is made.
 6. Every plan shows `budget` (this project) and `cap` (all live projects on the account). Edits to a site's files show up as an update with `changes: ["files"]`.
 
 ## Fastest path: `up`
@@ -20,7 +20,7 @@ npm run build                 # or whatever builds the site
 unlocal up --json             # data.url is the public link
 ```
 
-`up` finds the built site (`dist`, `build`, `out`, `_site`, `public`, `site`, or a plain folder of HTML), writes `unlocal.json` if there isn't one (Cloudflare, $5/mo budget), and deploys. It deploys unattended only when the plan deletes and replaces nothing and fits the project budget and the account cap; otherwise it fails with the usual code and hint. Running it again redeploys changed files or reports the existing URL. No built site: `SITE_NOT_FOUND`, whose hint says whether to build first. The first real deploy on an account fails with `CAP_NOT_SET` until a human sets the cap and adds funds in `unlocal console`; nothing is written before that check.
+`up` finds the built site (`dist`, `build`, `out`, `_site`, `public`, `site`, or a plain folder of HTML), writes `unlocal.json` if there isn't one (Cloudflare, $5/mo budget), and deploys. It deploys unattended only when the plan deletes and replaces nothing and fits the project budget and the account cap; otherwise it fails with the usual code and hint. Running it again redeploys changed files or reports the existing URL. No built site: `SITE_NOT_FOUND`, whose hint says whether to build first. Deploys that cost $0 (a site on Cloudflare) need no cap or balance; with none, the guard pauses them as soon as the cloud measures any real cost. A deploy that costs money fails with `CAP_NOT_SET` until a human sets the cap, and `up` then removes the `unlocal.json` it wrote.
 
 ## MCP
 

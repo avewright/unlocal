@@ -1,5 +1,6 @@
 import { loadAccount, withAccount } from "./account.ts";
 import { CLOUDS_INFO, type Cloud } from "./clouds.ts";
+import type { ResourceType } from "./types.ts";
 import { charge } from "./guard.ts";
 import { round2 } from "./pricing.ts";
 import { openProject } from "./project.ts";
@@ -39,14 +40,18 @@ export interface MeterRun {
   errors: { project: string; error: string }[];
 }
 
-/** Price one resource's usage. Metrics a cloud doesn't list in `meters` cost nothing. */
-export function priceUsage(cloud: Cloud, project: string, resource: string, usage: Record<string, number>): MeterLine[] {
+/**
+ * Price one resource's usage. Metrics the cloud doesn't list in `meters`, or lists for
+ * other resource types, are reported at $0.
+ */
+export function priceUsage(cloud: Cloud, project: string, resource: string, type: ResourceType, usage: Record<string, number>): MeterLine[] {
   const meters = CLOUDS_INFO[cloud].meters ?? {};
   return Object.entries(usage)
     .filter(([metric, quantity]) => meters[metric] && quantity > 0)
-    .map(([metric, quantity]) => ({
-      project, resource, metric, label: meters[metric]!.label, quantity, usd: quantity * meters[metric]!.usdPerUnit,
-    }));
+    .map(([metric, quantity]) => {
+      const m = meters[metric]!;
+      return { project, resource, metric, label: m.label, quantity, usd: m.types.includes(type) ? quantity * m.usdPerUnit : 0 };
+    });
 }
 
 export async function meterUsage(env: NodeJS.ProcessEnv, now: Date = new Date()): Promise<MeterRun> {
@@ -70,7 +75,7 @@ export async function meterUsage(env: NodeJS.ProcessEnv, now: Date = new Date())
       if (provider.usage) {
         for (const [name, r] of Object.entries(p.state.resources)) {
           const ctx = { project: p.state.project, cloud: r.cloud, region: r.region, dir, log: () => {} };
-          const priced = priceUsage(r.cloud, entry.project, name, await provider.usage(ctx, name, r.spec, r.outputs, window));
+          const priced = priceUsage(r.cloud, entry.project, name, r.type, await provider.usage(ctx, name, r.spec, r.outputs, window));
           lines.push(...priced);
           usd += priced.reduce((s, l) => s + l.usd, 0);
         }

@@ -23,23 +23,23 @@ Design rules:
 
 ## Target (hosted product)
 
+Decided 2026-11-04; the full design is HOSTED.md. In short:
+
 ```
-CLI  ·  MCP server  ·  REST API  ·  dashboard
+CLI  ·  MCP server  ·  REST API  ·  console
+                 │  agent holds only an unlocal token
+        Control plane (hosted, packages/control)
+          tenants, hashed tokens, encrypted cloud credentials, deploy queue,
+          the always-on guard and meter, approvals for purchases
                  │
-        Control plane (hosted)
-          auth, orgs, projects, scoped agent tokens (spend cap, resource-type allowlist, TTL)
-          state store (replaces .unlocal/state.json), locking, approval queue
-                 │
-        Provisioning workers ── Provider: aws (then gcp, azure)
-                 │
-        AWS Organizations: one member account per customer project
-                 │
-        Metering: Cost & Usage Reports + live estimates → prepaid wallet (Stripe)
-          hard stop: scale to zero / suspend when wallet or budget is exhausted
+        The customer's own cloud account (Cloudflare first)
+          free links: <name>.unlocal.app on unlocal's Cloudflare account
 ```
 
-### Billing model (decision: prepaid credits)
-Customers top up a wallet; unlocal resells cloud usage plus a platform fee (`PLATFORM_FEE_RATE`, placeholder 10%). Prepaid removes credit risk and fraud exposure while keeping "one bill". Per-customer member accounts give clean cost attribution and isolation.
+- **The customer's cloud, not ours.** Their cloud bill is theirs; unlocal sells the guardrails and the contract, not compute. No reselling, no markup.
+- **The cap is enforced by the server.** The agent's token can deploy and read usage. It can't raise a cap, add funds, unfreeze or delete data, and it never sees the cloud credential.
+- **Spend is measured, not only estimated.** The meter (meter.ts) reads usage the cloud reports and the guard pauses on the measured pace.
+- **Free links need no account.** $0 deploys go out with no setup; anything that can cost money needs the human's cap.
 
 ### Provider mapping (source of truth: `CLOUDS_INFO` in clouds.ts)
 | unlocal | AWS | Google Cloud | Azure | Oracle Cloud | Cloudflare |
@@ -48,15 +48,10 @@ Customers top up a wallet; unlocal resells cloud usage plus a platform fee (`PLA
 | `service` | ECS Fargate + ALB | Cloud Run | Container Apps | Container Instances + Load Balancer | not offered |
 | `postgres` | RDS for PostgreSQL | Cloud SQL | Database for PostgreSQL | Database with PostgreSQL | not offered |
 
-A type a cloud doesn't offer is a `CONFIG_INVALID` error naming what it does offer. Cloudflare credentials come from `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit) and `CLOUDFLARE_ACCOUNT_ID`; every Worker unlocal deploys carries the `UNLOCAL_ASSETS` binding, and unlocal refuses to overwrite or delete a Worker without it.
+A type a cloud doesn't offer is a `CONFIG_INVALID` error naming what it does offer. Cloudflare credentials come from `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit, plus Account Analytics: Read for metering) and `CLOUDFLARE_ACCOUNT_ID`; every Worker unlocal deploys carries the `UNLOCAL_ASSETS` binding, and unlocal refuses to overwrite or delete a Worker without it.
 
 Credentials surface as `secret://` refs on every cloud. Prices marked "unverified" in clouds.ts (Oracle Postgres; Azure and Google larger database sizes) must be confirmed before launch.
 
 ## Roadmap
-1. **Live `site` providers**: real static deploys with HTTPS on each cloud. Done: AWS, Cloudflare.
-2. `unlocal logs`, `unlocal secret set`, file upload for site contents.
-3. **MCP server** exposing plan/apply/status with the same guardrails.
-4. Live `service` and `postgres` providers on all four clouds.
-5. Hosted control plane: accounts, scoped agent tokens, remote state + locking.
-6. Managed AWS member accounts, prepaid wallet, metering and hard stops.
-7. Preview environments with `--ttl`, idle-resource detection.
+
+See ROADMAP.md.

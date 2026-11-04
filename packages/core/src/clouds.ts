@@ -39,6 +39,8 @@ export interface CloudInfo {
 export interface Meter {
   label: string;
   usdPerUnit: number;
+  /** Resource types this usage costs money for; others report it free. */
+  types: ResourceType[];
 }
 
 // Prices checked 2026-11. Values marked "unverified" are estimates: confirm them before launch.
@@ -113,10 +115,12 @@ export const CLOUDS_INFO: Record<Cloud, CloudInfo> = {
       site: { hostingMonth: 0, dnsZoneMonth: 0 },
     },
     meters: {
-      // Requests that reach Worker code (not static files). Workers Paid list price, checked
-      // 2026-11-04. Priced from the first request, ignoring the 10M/month included, so the
-      // guard errs high. On Workers Free these requests stop at the daily limit instead.
-      workerRequests: { label: "Worker requests", usdPerUnit: 0.3 / 1_000_000 },
+      // Requests that reach Worker code. Workers Paid list price, checked 2026-11-04, priced
+      // from the first request (ignoring the 10M/month included) so the guard errs high.
+      // Not for sites: their code only answers 404s, free on Workers Free (which stops at
+      // the daily limit instead of billing) and a rounding error on Paid. Pricing them
+      // paused free sites, which have no balance, over a single missing page.
+      workerRequests: { label: "Worker requests", usdPerUnit: 0.3 / 1_000_000, types: ["service"] },
     },
   },
 };

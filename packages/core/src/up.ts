@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { loadAccount } from "./account.ts";
 import type { ApplyEvent } from "./apply.ts";
 import { CLOUDS_INFO, type Cloud } from "./clouds.ts";
 import { CONFIG_FILE } from "./config.ts";
@@ -80,12 +79,6 @@ const firstUrl = (state: ProjectState) => {
 export async function up(dir: string, env: NodeJS.ProcessEnv, options: UpOptions): Promise<UpResult> {
   let createdConfig: string | null = null;
   const file = path.join(dir, CONFIG_FILE);
-  if (!options.sim && (await loadAccount(env)).monthlyCapUsd === null) {
-    // Refuse before writing anything, so a first try leaves the folder as it was.
-    throw new UnlocalError("CAP_NOT_SET", "set an account spending cap before the first real deploy", {
-      hint: "a human sets it in `unlocal console` or with `unlocal cap <usd>`, then run `unlocal up` again",
-    });
-  }
   if (!existsSync(file)) {
     const raw = starterConfig(dir, detectSite(dir), options.cloud);
     parseConfig(raw); // never write a config we'd reject
@@ -105,7 +98,14 @@ export async function up(dir: string, env: NodeJS.ProcessEnv, options: UpOptions
     });
   }
 
-  const result = await runPlan(project, plan, { sim: options.sim, onEvent: options.onEvent, log: options.log });
+  let result;
+  try {
+    result = await runPlan(project, plan, { sim: options.sim, onEvent: options.onEvent, log: options.log });
+  } catch (err) {
+    // Refused before anything deployed (e.g. it costs money and no cap is set): leave the folder as it was.
+    if (createdConfig && err instanceof UnlocalError && err.code === "CAP_NOT_SET") await rm(createdConfig, { force: true });
+    throw err;
+  }
   return {
     createdConfig,
     url: firstUrl(result.state),

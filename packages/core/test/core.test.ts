@@ -590,10 +590,12 @@ describe("metering", () => {
     version: 1, monthlyCapUsd: 100, balanceUsd: 40, transactions: [], settledAt: t0.toISOString(), projects: {}, ...over,
   });
 
-  it("prices only what the cloud lists a meter for", () => {
-    const lines = priceUsage("cloudflare", "demo", "web", { workerRequests: 2_000_000, somethingElse: 5 });
+  it("prices only what the cloud lists a meter for, for the resource types it costs money for", () => {
+    const lines = priceUsage("cloudflare", "demo", "api", "service", { workerRequests: 2_000_000, somethingElse: 5 });
     assert.equal(lines.length, 1);
     assert.equal(lines[0]!.usd.toFixed(2), "0.60");
+    const site = priceUsage("cloudflare", "demo", "web", "site", { workerRequests: 2_000_000 });
+    assert.deepEqual(site.map((l) => [l.quantity, l.usd]), [[2_000_000, 0]], "a site's 404s are counted, not charged");
   });
 
   it("pauses when measured usage would drain the balance within a day", () => {
@@ -601,6 +603,11 @@ describe("metering", () => {
     const s = assess(a, t0);
     assert.equal(s.meteredPerDayUsd, 48);
     assert.equal(s.level, "pause", "$2 in the last hour is $48/day against $5 left");
+  });
+
+  it("pauses a free deploy the moment it starts costing money", () => {
+    const free = base({ monthlyCapUsd: null, balanceUsd: 0, meterLog: [{ project: "a", from: hours(-1).toISOString(), to: t0.toISOString(), usd: 0.001 }] });
+    assert.equal(assess(free, t0).level, "pause");
   });
 
   it("warns on a spike against the day's pace", () => {
@@ -614,7 +621,7 @@ describe("metering", () => {
     assert.ok(!assess(base({ balanceUsd: 100, meterLog: steady }), t0).reasons.some((r) => /spiked/.test(r)), "no history, no spike");
   });
 
-  it("reads usage from Cloudflare, charges it once, and keeps going when a read fails", async () => {
+  it("reads usage from Cloudflare, never charges a free site for it, and keeps going when a read fails", async () => {
     const cf = fakeCloudflare();
     const fake = await serveFake(cf);
     try {
@@ -624,21 +631,25 @@ describe("metering", () => {
       writeFileSync(path.join(dir, "dist", "index.html"), "<h1>hi</h1>");
       writeFileSync(path.join(dir, "unlocal.json"), JSON.stringify({ project: "demo", cloud: "cloudflare", budget: { monthlyUsd: 5 }, resources: { web: { type: "site", path: "./dist" } } }));
       const env = { UNLOCAL_HOME: home, CLOUDFLARE_API_TOKEN: "tok", CLOUDFLARE_ACCOUNT_ID: "acc", CLOUDFLARE_API_BASE: fake.base };
-      writeFileSync(path.join(home, "account.json"), JSON.stringify(base({ balanceUsd: 10 })));
+      // A free site: no cap, no balance.
+      writeFileSync(path.join(home, "account.json"), JSON.stringify(base({ monthlyCapUsd: null, balanceUsd: 0 })));
       const { up } = await import("../src/index.ts");
       await up(dir, env, { sim: false });
       const deployedAt = new Date();
 
-      cf.hit("demo-web", new Date(deployedAt.getTime() + 60_000), 10_000_000); // $3.00
+      cf.hit("demo-web", new Date(deployedAt.getTime() + 60_000), 10_000_000);
       const later = new Date(deployedAt.getTime() + 2 * 3_600_000);
       const first = await meterUsage(env, later);
       assert.equal(first.errors.length, 0);
-      assert.equal(first.chargedUsd, 3);
-      assert.deepEqual(first.lines.map((l) => [l.resource, l.metric, l.quantity]), [["web", "workerRequests", 10_000_000]]);
-      assert.equal((await loadAccount(env)).balanceUsd, 7);
+      assert.deepEqual(first.lines.map((l) => [l.resource, l.metric, l.quantity, l.usd]), [["web", "workerRequests", 10_000_000, 0]]);
+      assert.equal(first.chargedUsd, 0);
+      const after = await loadAccount(env);
+      assert.equal(after.balanceUsd, 0);
+      assert.equal(assess(after, later).level, "ok", "a free site with traffic stays up");
 
+      cf.hit("demo-web", new Date(later.getTime() - METER_LAG_MS - 60_000), 1); // in a window already read
       const again = await meterUsage(env, later);
-      assert.equal(again.usd, 0, "the same window is never charged twice");
+      assert.equal(again.lines.length, 0, "the same window is never read twice");
 
       const broken = await meterUsage({ ...env, CLOUDFLARE_API_TOKEN: "wrong" }, new Date(later.getTime() + 3_600_000));
       assert.equal(broken.errors.length, 1, "a failed read is reported, not fatal");

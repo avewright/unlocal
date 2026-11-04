@@ -53,8 +53,11 @@ export function assertApplicable(plan: Plan, state: ProjectState, options: Guard
     );
   }
   if (options.enforceCap) {
+    // Free deploys need no setup. Without a cap there's no balance, so the guard pauses
+    // anything the moment the cloud measures a real cost.
+    if (!plan.cap && plan.cost.projectedMonthlyUsd === 0) return assertSafe(plan, options);
     if (!plan.cap) {
-      throw new UnlocalError("CAP_NOT_SET", "real deploys need an account-wide spending cap first", {
+      throw new UnlocalError("CAP_NOT_SET", "this deploy costs money, so it needs an account-wide spending cap first", {
         hint: "a human sets it once, in `unlocal console` or with `unlocal cap <usd>`: the most all projects together may cost per month",
       });
     }
@@ -73,6 +76,10 @@ export function assertApplicable(plan: Plan, state: ProjectState, options: Guard
       );
     }
   }
+  assertSafe(plan, options);
+}
+
+function assertSafe(plan: Plan, options: GuardOptions): void {
   if (plan.destructive && !options.allowDataLoss) {
     const names = plan.actions.filter((a) => a.destructive).map((a) => a.name);
     throw new UnlocalError("DESTRUCTIVE_CHANGE", `this plan would permanently delete data in: ${names.join(", ")}`, {
