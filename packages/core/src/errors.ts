@@ -24,6 +24,7 @@ export type ErrorCode =
   | "PLAN_STALE"
   | "PLAN_INVALID"
   | "APPLY_FAILED"
+  | "BUILD_FAILED"
   | "PROVIDER_UNAVAILABLE"
   | "PAYMENT_FAILED"
   | "INTERNAL";
@@ -51,6 +52,7 @@ export const EXIT_CODES: Record<ErrorCode, number> = {
   PLAN_STALE: 4,
   PLAN_INVALID: 4,
   APPLY_FAILED: 1,
+  BUILD_FAILED: 1,
   PROVIDER_UNAVAILABLE: 1,
   PAYMENT_FAILED: 1,
   INTERNAL: 1,

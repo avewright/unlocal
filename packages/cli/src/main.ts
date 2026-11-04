@@ -62,6 +62,7 @@ const OPTIONS = {
   plan: { type: "string" },
   "plan-id": { type: "string" },
   "dry-run": { type: "boolean", default: false },
+  "skip-build": { type: "boolean", default: false },
   project: { type: "string" },
   budget: { type: "string" },
   port: { type: "string" },
@@ -81,6 +82,7 @@ interface Flags {
   plan?: string;
   "plan-id"?: string;
   "dry-run": boolean;
+  "skip-build": boolean;
   project?: string;
   budget?: string;
   port?: string;
@@ -131,16 +133,18 @@ function costEstimates(config: ProjectConfig) {
 const COMMANDS: Record<string, Command> = {
   up: {
     summary: "Put this folder's site online and print its URL (writes unlocal.json if needed)",
-    flags: [`--cloud <${CLOUDS.join("|")}>  for a new unlocal.json; default cloudflare`],
+    flags: [`--cloud <${CLOUDS.join("|")}>  for a new unlocal.json; default cloudflare`, "--skip-build  deploy what's already built"],
     async run(ctx) {
       const r = await up(ctx.dir, ctx.env, {
         sim: ctx.flags.sim,
         cloud: ctx.flags.cloud as Cloud | undefined,
+        build: !ctx.flags["skip-build"],
         onEvent: progress(ctx),
         log: (m) => ctx.progress(`    ${m}`),
       });
       const { plan } = r;
       const lines: string[] = [];
+      if (r.build) lines.push(`Built with \`${r.build.command}\`${r.build.framework ? ` (${r.build.framework})` : ""} in ${r.build.seconds}s`);
       if (r.createdConfig) lines.push(`Wrote ${r.createdConfig} (${CLOUDS_INFO[plan.cloud].name}, ${usd(plan.budget.limitUsd)}/mo budget)`, "");
       lines.push(r.url ? `${r.applied.length ? "Live" : "Already live"} at ${r.url}` : r.applied.length ? "Deployed." : "Nothing to deploy.");
       if (r.applied.length) {

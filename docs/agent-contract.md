@@ -20,7 +20,7 @@ npm run build                 # or whatever builds the site
 unlocal up --json             # data.url is the public link
 ```
 
-`up` finds the built site (`dist`, `build`, `out`, `_site`, `public`, `site`, or a plain folder of HTML), writes `unlocal.json` if there isn't one (Cloudflare, $5/mo budget), and deploys. It deploys unattended only when the plan deletes and replaces nothing and fits the project budget and the account cap; otherwise it fails with the usual code and hint. Running it again redeploys changed files or reports the existing URL. No built site: `SITE_NOT_FOUND`, whose hint says whether to build first. Deploys that cost $0 (a site on Cloudflare) need no cap or balance; with none, the guard pauses them as soon as the cloud measures any real cost. A deploy that costs money fails with `CAP_NOT_SET` until a human sets the cap, and `up` then removes the `unlocal.json` it wrote.
+`up` first runs the project's `build` script, if `package.json` has one, with the package manager its lockfile names (installing dependencies only if `node_modules` is missing). A failed build is `BUILD_FAILED` with the last 40 lines in `error.details.output`; `--skip-build` deploys what's already built. `data.build` says what ran. Then `up` finds the built site (the framework's output folder first: Vite and Astro `dist`, Next.js `out`, SvelteKit and Create React App `build`; then `dist`, `build`, `out`, `_site`, `public`, `site`, or a plain folder of HTML), writes `unlocal.json` if there isn't one (Cloudflare, $5/mo budget), and deploys. It deploys unattended only when the plan deletes and replaces nothing and fits the project budget and the account cap; otherwise it fails with the usual code and hint. Running it again redeploys changed files or reports the existing URL. No built site: `SITE_NOT_FOUND`, whose hint says whether to build first. Deploys that cost $0 (a site on Cloudflare) need no cap or balance; with none, the guard pauses them as soon as the cloud measures any real cost. A deploy that costs money fails with `CAP_NOT_SET` until a human sets the cap, and `up` then removes the `unlocal.json` it wrote.
 
 ## MCP
 
@@ -49,7 +49,7 @@ Each guard run (not `--dry-run`) also reads the usage each cloud measured since 
 | Exit | Meaning | Codes |
 |---|---|---|
 | 0 | success | |
-| 1 | operation failed | `APPLY_FAILED`, `PROVIDER_UNAVAILABLE`, `STATE_CORRUPT`, `BUSY`, `INTERNAL` |
+| 1 | operation failed | `APPLY_FAILED`, `BUILD_FAILED`, `PROVIDER_UNAVAILABLE`, `STATE_CORRUPT`, `BUSY`, `INTERNAL` |
 | 2 | **needs a decision** (often a human's) | `APPROVAL_REQUIRED`, `BUDGET_EXCEEDED`, `CAP_NOT_SET`, `CAP_EXCEEDED`, `FUNDS_INSUFFICIENT`, `ACCOUNT_FROZEN`, `HUMAN_REQUIRED`, `DESTRUCTIVE_CHANGE`, `CLOUD_AUTH` |
 | 3 | bad config | `CONFIG_INVALID`, `CONFIG_NOT_FOUND`, `CONFIG_EXISTS`, `SITE_NOT_FOUND`, `NAME_TAKEN` |
 | 4 | plan out of date | `PLAN_STALE`, `PLAN_INVALID` |

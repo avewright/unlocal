@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { buildApp, detectFramework, readPackageJson, type BuildInfo } from "./build.ts";
 import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ApplyEvent } from "./apply.ts";
@@ -26,20 +27,23 @@ export function defaultProjectName(dir: string): string {
 }
 
 /** The folder to publish, relative to `dir` (e.g. "./dist"), or SITE_NOT_FOUND saying what to do. */
-export function detectSite(dir: string): string {
-  for (const d of SITE_DIRS) if (existsSync(path.join(dir, d, "index.html"))) return `./${d}`;
-  const pkg = path.join(dir, "package.json");
+export function detectSite(dir: string, options: { built?: boolean } = {}): string {
+  const pkg = readPackageJson(dir);
+  const framework = detectFramework(pkg);
+  // The framework's own output folder first: a Vite app's public/ is source, not the site.
+  const dirs = framework ? [framework.outDir, ...SITE_DIRS.filter((d) => d !== framework.outDir)] : SITE_DIRS;
+  for (const d of dirs) if (existsSync(path.join(dir, d, "index.html"))) return `./${d}`;
   // A plain folder of HTML can be published as is; an app's root holds source code, not the site.
-  if (!existsSync(pkg) && existsSync(path.join(dir, "index.html"))) return ".";
-  let build: string | undefined;
-  try {
-    build = (JSON.parse(readFileSync(pkg, "utf8")) as { scripts?: Record<string, string> }).scripts?.build;
-  } catch {
-    // no package.json, or not one we can read
+  if (!existsSync(path.join(dir, "package.json")) && existsSync(path.join(dir, "index.html"))) return ".";
+  const where = path.resolve(dir);
+  if (options.built && framework) {
+    throw new UnlocalError("SITE_NOT_FOUND", `the ${framework.name} build finished but left no index.html in ${framework.outDir}`, {
+      hint: framework.hint ?? `point resources.web.path in ${CONFIG_FILE} at the built folder`,
+    });
   }
-  throw new UnlocalError("SITE_NOT_FOUND", `no built site with an index.html in ${path.resolve(dir)}`, {
-    hint: build
-      ? "build it first (e.g. `npm run build`), then run `unlocal up` again"
+  throw new UnlocalError("SITE_NOT_FOUND", `no built site with an index.html in ${where}`, {
+    hint: pkg?.scripts?.build && !options.built
+      ? "run `unlocal up` without --skip-build, or build it first (e.g. `npm run build`)"
       : `put the site in one of: ${SITE_DIRS.join(", ")}, or write ${CONFIG_FILE} with its path`,
   });
 }
@@ -57,6 +61,8 @@ export function starterConfig(dir: string, sitePath: string, cloud: Cloud = "clo
 export interface UpOptions {
   sim: boolean;
   cloud?: Cloud;
+  /** Run the project's build script first (default true). */
+  build?: boolean;
   onEvent?: (e: ApplyEvent) => void;
   log?: (message: string) => void;
 }
@@ -64,6 +70,8 @@ export interface UpOptions {
 export interface UpResult {
   /** Set when `up` wrote unlocal.json. */
   createdConfig: string | null;
+  /** Set when `up` ran the project's build script. */
+  build: BuildInfo | null;
   url: string | null;
   plan: Plan;
   applied: { kind: string; name: string }[];
@@ -78,9 +86,11 @@ const firstUrl = (state: ProjectState) => {
 
 export async function up(dir: string, env: NodeJS.ProcessEnv, options: UpOptions): Promise<UpResult> {
   let createdConfig: string | null = null;
+  // Build every time, so what goes live is the current code, never a stale dist/.
+  const build = options.build === false ? null : await buildApp(dir, (line) => options.log?.(line));
   const file = path.join(dir, CONFIG_FILE);
   if (!existsSync(file)) {
-    const raw = starterConfig(dir, detectSite(dir), options.cloud);
+    const raw = starterConfig(dir, detectSite(dir, { built: build !== null }), options.cloud);
     parseConfig(raw); // never write a config we'd reject
     await writeFile(file, `${JSON.stringify(raw, null, 2)}\n`);
     createdConfig = file;
@@ -88,7 +98,7 @@ export async function up(dir: string, env: NodeJS.ProcessEnv, options: UpOptions
 
   const project = await openProject(dir, env);
   const plan = await planProject(project);
-  if (!plan.hasChanges) return { createdConfig, url: firstUrl(project.state), plan, applied: [], state: project.state };
+  if (!plan.hasChanges) return { createdConfig, build, url: firstUrl(project.state), plan, applied: [], state: project.state };
 
   const removes = plan.actions.filter((a) => a.kind === "delete" || a.kind === "replace").map((a) => a.name);
   if (removes.length > 0) {
@@ -108,6 +118,7 @@ export async function up(dir: string, env: NodeJS.ProcessEnv, options: UpOptions
   }
   return {
     createdConfig,
+    build,
     url: firstUrl(result.state),
     plan,
     applied: result.applied.map((a) => ({ kind: a.kind, name: a.name })),

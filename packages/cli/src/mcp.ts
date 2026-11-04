@@ -30,7 +30,8 @@ interface Tool {
 const TOOLS: Record<string, Tool> = {
   up: {
     description:
-      "Put a built site online and return its public URL. Writes unlocal.json (Cloudflare, $5/mo budget) if the folder has none. " +
+      "Put this app's site online and return its public URL. Runs the project's build script first, if it has one (BUILD_FAILED returns the build output). " +
+      "Writes unlocal.json (Cloudflare, $5/mo budget) if the folder has none. Free sites need no setup. " +
       "Deploys only when nothing would be deleted and it fits the project budget and the account cap.",
     properties: { dir },
     required: ["dir"],

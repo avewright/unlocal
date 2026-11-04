@@ -258,10 +258,40 @@ describe("unlocal up (localhost to live)", () => {
   it("publishes a plain HTML folder as is, but never an app's root", () => {
     assert.equal(cli(folder({ "index.html": "<h1>hi</h1>" }), ["up"]).code, 0);
     const app = folder({ "index.html": "<div id=app>", "package.json": JSON.stringify({ scripts: { build: "vite build" } }) });
-    const r = cli(app, ["up"]);
+    const r = cli(app, ["up", "--skip-build"]);
     assert.equal(r.code, 3);
     assert.equal(r.body.error.code, "SITE_NOT_FOUND");
-    assert.match(r.body.error.hint, /npm run build/);
+    assert.match(r.body.error.hint, /without --skip-build|npm run build/);
+  });
+
+  it("builds the app first, with its own build script", () => {
+    const app = folder({
+      "package.json": JSON.stringify({ scripts: { build: "node build.js" } }),
+      "build.js": `require("fs").mkdirSync("dist", { recursive: true }); require("fs").writeFileSync("dist/index.html", "<h1>built</h1>");`,
+    });
+    const r = cli(app, ["up"]);
+    assert.equal(r.code, 0, JSON.stringify(r.body));
+    assert.equal(r.body.data.build.command, "npm run build");
+    assert.equal(r.body.data.state.resources.web.spec.path, "./dist");
+    assert.ok(r.body.data.url);
+  });
+
+  it("reports a failed build with its output, and writes nothing", () => {
+    const app = folder({
+      "package.json": JSON.stringify({ scripts: { build: "node -e \"console.error('Cannot find module ./App'); process.exit(2)\"" } }),
+    });
+    const r = cli(app, ["up"]);
+    assert.equal(r.code, 1);
+    assert.equal(r.body.error.code, "BUILD_FAILED");
+    assert.ok(r.body.error.details.output.some((l: string) => /Cannot find module/.test(l)));
+    assert.equal(existsSync(path.join(app, "unlocal.json")), false);
+  });
+
+  it("says what a framework needs when its build makes no static site", () => {
+    const app = folder({ "package.json": JSON.stringify({ scripts: { build: "node -e 0" }, dependencies: { next: "15.0.0" } }), "node_modules/.keep": "" });
+    const r = cli(app, ["up"]);
+    assert.equal(r.body.error.code, "SITE_NOT_FOUND");
+    assert.match(r.body.error.hint, /output: "export"/);
   });
 
   it("won't delete anything unattended", () => {
