@@ -4,8 +4,17 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import {
+  CLOUDS_INFO,
   MAX_CAP_USD,
+  assess,
+  runGuard,
+  settledAccount,
+  stopEverything,
+  unfreezeAccount,
   UnlocalError,
+  createCloudflareProvider,
+  loadCredentials,
+  saveCredentials,
   creditAccount,
   liveSpendUsd,
   loadAccount,
@@ -13,7 +22,7 @@ import {
   planProject,
   round2,
   runPlan,
-  saveAccount,
+  withAccount,
   type ErrorCode,
 } from "@unlocal/core";
 import {
@@ -40,7 +49,11 @@ export interface ConsoleOptions {
   port?: number;
   /** Require an account and password. Off for the local console: only this machine can reach it. */
   login?: boolean;
+  /** How often the guard checks spending while the console runs; 0 turns it off. */
+  guardEveryMs?: number;
 }
+
+export const GUARD_EVERY_MS = 5 * 60_000;
 
 /** The user every request acts as when login is off. */
 const LOCAL_USER: User = { id: "local", email: "", password: "", createdAt: "" };
@@ -124,7 +137,7 @@ export async function startConsole(options: ConsoleOptions = {}): Promise<Runnin
 
   async function projectsView(user: User) {
     const data = await loadData(env);
-    const account = await loadAccount(env);
+    const account = await settledAccount(env);
     const dirs = [...new Set([...data.projects, ...Object.keys(account.projects)])];
     const projects = await Promise.all(dirs.map(async (dir) => {
       try {
@@ -145,9 +158,26 @@ export async function startConsole(options: ConsoleOptions = {}): Promise<Runnin
         return { dir, error: err instanceof Error ? err.message : String(err) };
       }
     }));
+    // Committed spend grouped by provider, so every cloud's cost is visible in one place.
+    const byCloud = new Map<string, { cloud: string; name: string; projects: number; monthlyUsd: number }>();
+    for (const e of Object.values(account.projects)) {
+      if (!e.live) continue;
+      const row = byCloud.get(e.cloud) ?? { cloud: e.cloud, name: CLOUDS_INFO[e.cloud]?.name ?? e.cloud, projects: 0, monthlyUsd: 0 };
+      row.projects++;
+      row.monthlyUsd = round2(row.monthlyUsd + e.monthlyUsd);
+      byCloud.set(e.cloud, row);
+    }
+    const cf = loadCredentials(env).cloudflare;
     return {
       user: { email: user.email },
       login,
+      guard: assess(account),
+      spend: [...byCloud.values()].sort((a, b) => b.monthlyUsd - a.monthlyUsd),
+      connections: {
+        cloudflare: env.CLOUDFLARE_API_TOKEN
+          ? { connected: true, source: "env", accountId: env.CLOUDFLARE_ACCOUNT_ID ?? null }
+          : { connected: Boolean(cf), source: cf ? "console" : null, accountId: cf?.accountId ?? null },
+      },
       balanceUsd: account.balanceUsd,
       monthlyCapUsd: account.monthlyCapUsd,
       liveMonthlyUsd: liveSpendUsd(account),
@@ -203,10 +233,8 @@ export async function startConsole(options: ConsoleOptions = {}): Promise<Runnin
     "POST /api/cap": authed(async (_req, res, _user, body) => {
       const usd = amount(body.usd, "cap");
       if (usd > MAX_CAP_USD) throw new UnlocalError("USAGE", `cap can't exceed $${MAX_CAP_USD}`);
-      const account = await loadAccount(env);
-      account.monthlyCapUsd = round2(usd);
-      await saveAccount(account, env);
-      send(res, 200, { ok: true, monthlyCapUsd: account.monthlyCapUsd });
+      const monthlyCapUsd = await withAccount(env, (account) => (account.monthlyCapUsd = round2(usd)));
+      send(res, 200, { ok: true, monthlyCapUsd });
     }),
 
     "POST /api/funds": authed(async (_req, res, user, body) => {
@@ -216,20 +244,53 @@ export async function startConsole(options: ConsoleOptions = {}): Promise<Runnin
         const checkoutUrl = await createCheckout(env, { amountUsd: usd, userId: user.id, baseUrl });
         return send(res, 200, { ok: true, checkoutUrl });
       }
-      const account = await loadAccount(env);
-      creditAccount(account, usd, "credit");
-      await saveAccount(account, env);
-      send(res, 200, { ok: true, balanceUsd: account.balanceUsd });
+      const balanceUsd = await withAccount(env, (account) => {
+        creditAccount(account, usd, "credit");
+        return account.balanceUsd;
+      });
+      send(res, 200, { ok: true, balanceUsd });
     }),
 
     "GET /api/funds/return": authed(async (req, res, user) => {
       const id = new URL(req.url ?? "", baseUrl).searchParams.get("session_id") ?? "";
       const checkout = await fetchCheckout(env, id);
       if (checkout.paid && checkout.userId === user.id) {
-        const account = await loadAccount(env);
-        if (creditAccount(account, checkout.amountUsd, "topup", id)) await saveAccount(account, env);
+        await withAccount(env, (account) => creditAccount(account, checkout.amountUsd, "topup", id));
       }
       res.writeHead(303, { location: "/" }).end();
+    }),
+
+    "POST /api/connect/cloudflare": authed(async (_req, res, _user, body) => {
+      const apiToken = typeof body.apiToken === "string" ? body.apiToken.trim() : "";
+      const accountId = typeof body.accountId === "string" ? body.accountId.trim() : "";
+      if (!apiToken || !/^[0-9a-f]{32}$/i.test(accountId)) {
+        throw new UnlocalError("USAGE", "enter your Cloudflare account ID (32 characters) and an API token");
+      }
+      // Check the token works and the account can serve workers.dev sites before saving it.
+      const probe = createCloudflareProvider({
+        env: { CLOUDFLARE_API_TOKEN: apiToken, CLOUDFLARE_ACCOUNT_ID: accountId, CLOUDFLARE_API_BASE: env.CLOUDFLARE_API_BASE },
+      });
+      await probe.preflight!({ project: "unlocal", cloud: "cloudflare", region: "global", dir: ".", log: () => {} });
+      const credentials = loadCredentials(env);
+      credentials.cloudflare = { apiToken, accountId };
+      await saveCredentials(credentials, env);
+      send(res, 200, { ok: true, accountId });
+    }),
+
+    "POST /api/disconnect/cloudflare": authed(async (_req, res) => {
+      const credentials = loadCredentials(env);
+      delete credentials.cloudflare;
+      await saveCredentials(credentials, env);
+      send(res, 200, { ok: true });
+    }),
+
+    "POST /api/stop": authed(async (_req, res) => {
+      send(res, 200, { ok: true, paused: await stopEverything(env, "stopped from the console") });
+    }),
+
+    "POST /api/unfreeze": authed(async (_req, res) => {
+      await unfreezeAccount(env);
+      send(res, 200, { ok: true });
     }),
 
     "POST /api/projects": authed(async (_req, res, _user, body) => {
@@ -312,8 +373,15 @@ export async function startConsole(options: ConsoleOptions = {}): Promise<Runnin
   });
   await new Promise<void>((resolve) => server.listen(options.port ?? 4400, "127.0.0.1", resolve));
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  // While the console is open, the guard keeps watching spend, even with no one looking at it.
+  const every = options.guardEveryMs ?? GUARD_EVERY_MS;
+  const guardTimer = every > 0 ? setInterval(() => void runGuard(env).catch(() => {}), every) : undefined;
+  guardTimer?.unref();
   return {
     url: baseUrl,
-    close: () => new Promise((resolve) => server.close(() => resolve())),
+    close: () => {
+      clearInterval(guardTimer);
+      return new Promise((resolve) => server.close(() => resolve()));
+    },
   };
 }

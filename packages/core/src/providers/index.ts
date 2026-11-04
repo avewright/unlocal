@@ -1,14 +1,19 @@
 import { CLOUDS_INFO, type Cloud } from "../clouds.ts";
+import { withCredentials } from "../credentials.ts";
 import { UnlocalError } from "../errors.ts";
 import type { Provider } from "./provider.ts";
 import { createAwsProvider } from "./aws.ts";
+import { createCloudflareProvider } from "./cloudflare.ts";
 import { createSimProvider } from "./sim.ts";
 
 /**
  * Real providers, one per cloud, register here as they're built.
  * `--sim` runs the same plan against a simulated cloud instead.
  */
-const LIVE: Partial<Record<Cloud, () => Provider>> = { aws: createAwsProvider };
+const LIVE: Partial<Record<Cloud, (env: NodeJS.ProcessEnv) => Provider>> = {
+  aws: createAwsProvider,
+  cloudflare: (env) => createCloudflareProvider({ env: withCredentials(env) }),
+};
 
 export function getProvider(cloud: Cloud, options: { sim: boolean; env?: NodeJS.ProcessEnv }): Provider {
   const env = options.env ?? process.env;
@@ -19,5 +24,5 @@ export function getProvider(cloud: Cloud, options: { sim: boolean; env?: NodeJS.
       hint: "add --sim to run this plan against a simulated cloud",
     });
   }
-  return live();
+  return live(env);
 }

@@ -1,4 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 import {
   CLOUDS,
@@ -7,6 +12,23 @@ import {
   creditAccount,
   distributionConfig,
   createAwsProvider,
+  createCloudflareProvider,
+  assess,
+  recordDeploy,
+  runGuard,
+  priceUsage,
+  meterUsage,
+  METER_LAG_MS,
+  withAccount,
+  withLock,
+  loadAccount,
+  pausedConfig,
+  settle,
+  type Account,
+  saveCredentials,
+  withCredentials,
+  MARKER_BINDING,
+  scriptName,
   CLOUDS_INFO,
   UnlocalError,
   applyPlan,
@@ -15,6 +37,7 @@ import {
   emptyState,
   estimateResource,
   parseConfig,
+  type Cloud,
   type ProjectConfig,
   type ProjectState,
 } from "../src/index.ts";
@@ -30,6 +53,12 @@ const base = {
 };
 
 const config = (overrides: Record<string, unknown> = {}): ProjectConfig => parseConfig({ ...base, ...overrides });
+
+/** The base project on `cloud`, keeping only the resource types that cloud offers. */
+const onCloud = (cloud: Cloud, overrides: Record<string, unknown> = {}): ProjectConfig => {
+  const resources = Object.fromEntries(Object.entries(base.resources).filter(([, r]) => CLOUDS_INFO[cloud].native[r.type as "site"]));
+  return config({ cloud, resources, ...overrides });
+};
 
 function issuesOf(fn: () => unknown): { path: string; message: string }[] {
   try {
@@ -101,7 +130,7 @@ describe("estimateResource", () => {
 describe("multi-cloud", () => {
   it("accepts every cloud with its own default region", () => {
     for (const cloud of CLOUDS) {
-      const c = config({ cloud });
+      const c = onCloud(cloud);
       assert.equal(c.region, CLOUDS_INFO[cloud].defaultRegion);
     }
   });
@@ -115,13 +144,19 @@ describe("multi-cloud", () => {
   it("prices every resource type on every cloud, in every region", () => {
     for (const cloud of CLOUDS) {
       for (const region of Object.keys(CLOUDS_INFO[cloud].regions)) {
-        for (const [name, spec] of Object.entries(config({ cloud, region }).resources)) {
+        for (const [name, spec] of Object.entries(onCloud(cloud, { region }).resources)) {
           const est = estimateResource(spec, cloud, region);
           assert.ok(est.monthlyUsd >= 0 && Number.isFinite(est.monthlyUsd), `${cloud} ${region} ${name}`);
           if (spec.type !== "site") assert.ok(est.monthlyUsd > 0, `${cloud} ${name} should cost something`);
         }
       }
     }
+  });
+
+  it("rejects resource types a cloud doesn't offer, naming what it does", () => {
+    const issues = issuesOf(() => config({ cloud: "cloudflare" }));
+    assert.deepEqual(issues.map((i) => i.path), ["resources.api.type", "resources.db.type"]);
+    assert.match(issues[0]!.message, /Cloudflare hosts only sites/);
   });
 
   it("names the native service in line items", () => {
@@ -194,6 +229,18 @@ describe("applyPlan", () => {
     assert.equal(state.serial, 1);
     assert.match(state.resources.db!.outputs.passwordRef!, /^secret:\/\//);
     assert.ok(!JSON.stringify(state).toLowerCase().includes("\"password\""));
+  });
+
+  it("doesn't bump the serial when there is nothing to do", async () => {
+    const cfg = config();
+    const { state } = await apply(cfg, emptyState("demo"));
+    const saved: ProjectState[] = [];
+    const result = await applyPlan(createPlan(cfg, state), state, {
+      dir: ".", provider: createSimProvider(), persist: async (s) => void saved.push(structuredClone(s)),
+    });
+    assert.equal(result.state.serial, state.serial);
+    assert.deepEqual(result.applied, []);
+    assert.equal(saved.length, 0, "a no-op apply writes nothing");
   });
 
   it("refuses over-budget plans", async () => {
@@ -284,6 +331,379 @@ describe("aws provider", () => {
     assert.equal(aws.unsupported?.({ type: "site", path: ".", spa: false }), undefined);
     assert.match(aws.unsupported?.({ type: "site", path: ".", spa: false, domain: "x.com" }) ?? "", /domains/);
     assert.match(aws.unsupported?.({ type: "postgres", size: "small", storageGb: 20, highAvailability: false }) ?? "", /postgres/);
+  });
+});
+
+/** An in-memory stand-in for the Cloudflare API endpoints the provider uses. */
+function fakeCloudflare() {
+  const scripts = new Map<string, { bindings: { name: string; type: string }[]; metadata?: Record<string, any>; source?: string; routed?: boolean }>();
+  const assets = new Map<string, { body: string; type: string }>();
+  let uploads = 0;
+  const hits: { script: string; at: number; n: number }[] = [];
+  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const fail = (status: number, code: number, message: string) => json(status, { success: false, errors: [{ code, message }] });
+  const ok = (result: unknown, status = 200) => json(status, { success: true, errors: [], result });
+
+  const fetchImpl = async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(String(input));
+    const route = url.pathname.replace(/^\/client\/v4\/accounts\/acc/, "");
+    const auth = new Headers(init.headers).get("authorization");
+    const method = init.method ?? "GET";
+    if (route === "/workers/assets/upload") {
+      if (auth !== "Bearer upload-jwt") return fail(401, 10000, "Authentication error");
+      for (const [hash, value] of (init.body as FormData).entries()) {
+        const blob = value as Blob;
+        assets.set(hash, { body: Buffer.from(await blob.text(), "base64").toString(), type: blob.type });
+        uploads++;
+      }
+      return ok({ jwt: "complete-jwt" }, 201);
+    }
+    if (auth !== "Bearer tok") return fail(403, 10000, "Authentication error");
+    if (url.pathname === "/client/v4/graphql") {
+      const { variables: v } = JSON.parse(String(init.body));
+      const from = Date.parse(v.from), to = Date.parse(v.to);
+      const requests = hits.filter((h) => h.script === v.script && h.at >= from && h.at < to).reduce((s, h) => s + h.n, 0);
+      return json(200, { data: { viewer: { accounts: [{ workersInvocationsAdaptive: [{ sum: { requests } }] }] } }, errors: null });
+    }
+    if (route === "/workers/subdomain") return ok({ subdomain: "avery" });
+    const m = route.match(/^\/workers\/scripts\/([^/]+)(\/.*)?$/);
+    if (!m) return fail(404, 7003, "no route");
+    const [, name, rest = ""] = m as unknown as [string, string, string?];
+    if (rest === "/settings") return scripts.has(name) ? ok({ bindings: scripts.get(name)!.bindings }) : fail(404, 10007, "script not found");
+    if (rest === "/assets-upload-session") {
+      const manifest = JSON.parse(String(init.body)).manifest as Record<string, { hash: string }>;
+      const missing = Object.values(manifest).map((f) => f.hash).filter((h) => !assets.has(h));
+      return ok(missing.length ? { jwt: "upload-jwt", buckets: [missing] } : { jwt: "complete-jwt", buckets: [] });
+    }
+    if (rest === "/subdomain") {
+      const enabled = JSON.parse(String(init.body)).enabled as boolean;
+      if (scripts.has(name)) scripts.get(name)!.routed = enabled;
+      return ok({ enabled, previews_enabled: false });
+    }
+    if (method === "PUT") {
+      const form = init.body as FormData;
+      const metadata = JSON.parse(await (form.get("metadata") as Blob).text());
+      if (metadata.assets.jwt !== "complete-jwt") return fail(400, 10021, "bad assets jwt");
+      scripts.set(name, { bindings: metadata.bindings, metadata, source: await (form.get("index.js") as Blob).text(), routed: scripts.get(name)?.routed ?? false });
+      return ok({ id: name });
+    }
+    if (method === "DELETE") return scripts.delete(name) ? ok(null) : fail(404, 10007, "script not found");
+    return fail(404, 7003, "no route");
+  };
+  /** Requests that reached a Worker's code at a moment. */
+  const hit = (script: string, at: Date, n: number) => hits.push({ script, at: at.getTime(), n });
+  return { scripts, assets, uploads: () => uploads, hit, fetch: fetchImpl as typeof fetch };
+}
+
+describe("cloudflare provider", () => {
+  const env = { CLOUDFLARE_API_TOKEN: "tok", CLOUDFLARE_ACCOUNT_ID: "acc" };
+  const site = { type: "site" as const, path: "./dist", spa: false };
+  const project = () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "unlocal-cf-"));
+    mkdirSync(path.join(dir, "dist"));
+    writeFileSync(path.join(dir, "dist", "index.html"), "<h1>hi</h1>");
+    writeFileSync(path.join(dir, "dist", "app.css"), "h1{}");
+    return { project: "demo", cloud: "cloudflare" as const, region: "global", dir, log: () => {} };
+  };
+
+  it("deploys a site to workers.dev, uploading only files Cloudflare lacks", async () => {
+    const cf = fakeCloudflare();
+    const provider = createCloudflareProvider({ env, fetch: cf.fetch });
+    const ctx = project();
+    await provider.preflight!(ctx);
+    const out = await provider.create(ctx, "web", site);
+    assert.equal(out.url, "https://demo-web.avery.workers.dev");
+    assert.equal(cf.uploads(), 2);
+    assert.ok([...cf.assets.values()].some((a) => a.body === "<h1>hi</h1>" && a.type.startsWith("text/html")));
+    const meta = cf.scripts.get("demo-web")!.metadata!;
+    assert.equal(meta.assets.config.not_found_handling, "404-page");
+    assert.equal(meta.bindings[0].name, MARKER_BINDING);
+
+    await provider.update(ctx, "web", site, { ...site, spa: true }, out);
+    assert.equal(cf.uploads(), 2, "unchanged files aren't re-uploaded");
+    assert.equal(cf.scripts.get("demo-web")!.metadata!.assets.config.not_found_handling, "single-page-application");
+
+    writeFileSync(path.join(ctx.dir, "dist", "index.html"), "<h1>v2</h1>");
+    await provider.update(ctx, "web", site, site, out);
+    assert.equal(cf.uploads(), 3);
+
+    await provider.delete(ctx, "web", site, out);
+    assert.equal(cf.scripts.has("demo-web"), false);
+    await provider.delete(ctx, "web", site, out); // already gone: still fine
+  });
+
+  it("never overwrites a Worker it didn't make", async () => {
+    const cf = fakeCloudflare();
+    cf.scripts.set("demo-web", { bindings: [] });
+    const provider = createCloudflareProvider({ env, fetch: cf.fetch });
+    await assert.rejects(provider.create(project(), "web", site), { code: "NAME_TAKEN" });
+    assert.equal(cf.uploads(), 0);
+  });
+
+  it("reports missing or rejected credentials as CLOUD_AUTH", async () => {
+    const cf = fakeCloudflare();
+    await assert.rejects(createCloudflareProvider({ env: {}, fetch: cf.fetch }).preflight!(project()), { code: "CLOUD_AUTH" });
+    const wrong = createCloudflareProvider({ env: { ...env, CLOUDFLARE_API_TOKEN: "nope" }, fetch: cf.fetch });
+    await assert.rejects(wrong.preflight!(project()), { code: "CLOUD_AUTH" });
+  });
+
+  it("makes valid, deterministic Worker names and prices sites at $0", () => {
+    const long = scriptName("a".repeat(32), "b".repeat(32));
+    assert.ok(long.length <= 63);
+    assert.match(long, /^[a-z0-9-]+$/);
+    assert.equal(scriptName("p", "n"), "p-n");
+    assert.equal(estimateResource(site, "cloudflare", "global").monthlyUsd, 0);
+    assert.match(createCloudflareProvider({ env }).unsupported?.({ ...site, domain: "x.com" }) ?? "", /domains/);
+  });
+});
+
+/** Serve the in-memory Cloudflare fake over HTTP, for code paths that build their own provider. */
+async function serveFake(cf: ReturnType<typeof fakeCloudflare>) {
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const url = `http://fake${req.url}`;
+    const headers = new Headers(req.headers as Record<string, string>);
+    let body: RequestInit["body"] = chunks.length ? Buffer.concat(chunks) : undefined;
+    if (headers.get("content-type")?.startsWith("multipart/")) body = await new Request(url, { method: req.method, headers, body }).formData();
+    const r = await cf.fetch(url, { method: req.method, headers, body });
+    res.writeHead(r.status, { "content-type": "application/json" }).end(await r.text());
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  return { base: `http://127.0.0.1:${(server.address() as AddressInfo).port}/client/v4`, close: () => server.close() };
+}
+
+describe("guard", () => {
+  const t0 = new Date("2026-11-10T00:00:00Z");
+  const day = (n: number) => new Date(t0.getTime() + n * 86_400_000);
+  const account = (over: Partial<Account> = {}): Account => ({
+    version: 1, monthlyCapUsd: 100, balanceUsd: 40, transactions: [], settledAt: t0.toISOString(),
+    projects: { "/a": { project: "a", cloud: "gcp", monthlyUsd: 30, live: true, updatedAt: "" } },
+    ...over,
+  });
+
+  it("charges running resources to the balance by the hour, in whole cents", () => {
+    const a = account();
+    assert.equal(settle(a, day(1)), 1);
+    assert.equal(a.balanceUsd, 39);
+    assert.equal(a.transactions[0]!.kind, "charge");
+    settle(a, new Date(day(1).getTime() + 3_600_000 * 12));
+    assert.equal(a.transactions.length, 1, "same-day charges merge into one line");
+    assert.equal(a.balanceUsd, 38.5);
+    const idle = account({ projects: {} });
+    settle(idle, day(5));
+    assert.equal(idle.balanceUsd, 40);
+    assert.equal(idle.settledAt, day(5).toISOString(), "idle time is never charged later");
+  });
+
+  it("warns as the balance or the cap gets close, and pauses before money runs out", () => {
+    assert.equal(assess(account(), t0).level, "ok");
+    const low = assess(account({ balanceUsd: 5 }), t0);
+    assert.equal(low.level, "warn");
+    assert.equal(low.runwayDays, 5);
+    assert.match(low.reasons[0]!, /about 5 days/);
+    assert.equal(assess(account({ balanceUsd: 0.5 }), t0).level, "pause");
+    assert.equal(assess(account({ balanceUsd: 40 }), day(39.6)).level, "pause", "the balance drains as time passes");
+    assert.equal(assess(account({ monthlyCapUsd: 25 }), t0).level, "warn", "on track for $20 of a $25 cap");
+    const spent = account({ transactions: [{ id: "c", kind: "charge", amountUsd: 100, at: t0.toISOString() }] });
+    assert.match(assess(spent, t0).reasons[0]!, /reached the \$100\.00 cap/);
+  });
+
+  it("pausing keeps every running database, even one already removed from unlocal.json", async () => {
+    const { state } = await apply(config(), emptyState("demo"));
+    const paused = pausedConfig(config(), state);
+    assert.deepEqual(Object.keys(paused.resources), ["db"]);
+    const plan = createPlan(paused, state);
+    assert.equal(plan.destructive, false);
+    assert.deepEqual(plan.actions.filter((a) => a.kind === "delete").map((a) => a.name).sort(), ["api", "web"]);
+    const dropped = pausedConfig({ ...config(), resources: {} }, state);
+    assert.deepEqual(Object.keys(dropped.resources), ["db"]);
+    assert.equal(createPlan(dropped, state).destructive, false);
+  });
+
+  it("freezes on a deploy loop", () => {
+    const a = account();
+    for (let i = 0; i < 50; i++) assert.equal(recordDeploy(a, t0), false);
+    assert.equal(recordDeploy(a, t0), true);
+    assert.match(a.frozen!.reason, /51 deploys/);
+    const later = account();
+    for (let i = 0; i < 60; i++) recordDeploy(later, new Date(t0.getTime() + i * 120_000));
+    assert.equal(later.frozen, undefined, "spread over two hours is fine");
+  });
+
+  it("takes live sites offline and freezes deploys when the balance is about to run out", async () => {
+    const cf = fakeCloudflare();
+    const fake = await serveFake(cf);
+    try {
+      const home = mkdtempSync(path.join(tmpdir(), "unlocal-guard-"));
+      const dir = mkdtempSync(path.join(tmpdir(), "unlocal-guard-site-"));
+      mkdirSync(path.join(dir, "dist"));
+      writeFileSync(path.join(dir, "dist", "index.html"), "<h1>hi</h1>");
+      writeFileSync(path.join(dir, "unlocal.json"), JSON.stringify({ project: "demo", cloud: "cloudflare", budget: { monthlyUsd: 5 }, resources: { web: { type: "site", path: "./dist" } } }));
+      const env = { UNLOCAL_HOME: home, CLOUDFLARE_API_TOKEN: "tok", CLOUDFLARE_ACCOUNT_ID: "acc", CLOUDFLARE_API_BASE: fake.base };
+      writeFileSync(path.join(home, "account.json"), JSON.stringify(account({ balanceUsd: 10, projects: {} })));
+
+      const { up } = await import("../src/index.ts");
+      const deployed = await up(dir, env, { sim: false });
+      assert.match(deployed.url!, /workers\.dev/);
+      assert.ok(cf.scripts.has("demo-web"));
+
+      // Pretend this site costs $30/mo and the balance is nearly gone.
+      const a = JSON.parse(readFileSync(path.join(home, "account.json"), "utf8")) as Account;
+      a.projects[path.resolve(dir)]!.monthlyUsd = 30;
+      a.balanceUsd = 0.5;
+      a.settledAt = new Date().toISOString();
+      writeFileSync(path.join(home, "account.json"), JSON.stringify(a));
+
+      const r = await runGuard(env);
+      assert.equal(r.status.level, "pause");
+      assert.equal(r.froze, true);
+      assert.deepEqual(r.paused.map((p) => [p.project, p.stopped, p.how]), [["demo", ["web"], "paused"]]);
+      assert.equal(cf.scripts.get("demo-web")!.routed, false, "offline: workers.dev no longer routes to it");
+      assert.ok(cf.scripts.has("demo-web"), "but the Worker and its files are kept");
+      const after = JSON.parse(readFileSync(path.join(home, "account.json"), "utf8")) as Account;
+      assert.equal(after.projects[path.resolve(dir)]!.monthlyUsd, 0, "paused costs nothing");
+      await assert.rejects(up(dir, env, { sim: false }), { code: "ACCOUNT_FROZEN" });
+
+      // A human unfreezes and tops up; the next deploy resumes the same Worker, uploading nothing new.
+      const { unfreezeAccount } = await import("../src/index.ts");
+      await unfreezeAccount(env);
+      const topped = JSON.parse(readFileSync(path.join(home, "account.json"), "utf8")) as Account;
+      topped.balanceUsd = 50;
+      writeFileSync(path.join(home, "account.json"), JSON.stringify(topped));
+      const uploadsBefore = cf.uploads();
+      const resumed = await up(dir, env, { sim: false });
+      assert.deepEqual(resumed.plan.actions.map((a) => [a.kind, a.changes]), [["update", ["paused"]]]);
+      assert.equal(cf.uploads(), uploadsBefore);
+      assert.equal(cf.scripts.get("demo-web")!.routed, true, "back online");
+      assert.equal(resumed.state.resources.web!.paused, undefined);
+    } finally {
+      fake.close();
+    }
+  });
+});
+
+describe("metering", () => {
+  const t0 = new Date("2026-11-10T12:00:00Z");
+  const hours = (n: number) => new Date(t0.getTime() + n * 3_600_000);
+  const base = (over: Partial<Account> = {}): Account => ({
+    version: 1, monthlyCapUsd: 100, balanceUsd: 40, transactions: [], settledAt: t0.toISOString(), projects: {}, ...over,
+  });
+
+  it("prices only what the cloud lists a meter for", () => {
+    const lines = priceUsage("cloudflare", "demo", "web", { workerRequests: 2_000_000, somethingElse: 5 });
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0]!.usd.toFixed(2), "0.60");
+  });
+
+  it("pauses when measured usage would drain the balance within a day", () => {
+    const a = base({ balanceUsd: 5, meterLog: [{ project: "a", from: hours(-1).toISOString(), to: t0.toISOString(), usd: 2 }] });
+    const s = assess(a, t0);
+    assert.equal(s.meteredPerDayUsd, 48);
+    assert.equal(s.level, "pause", "$2 in the last hour is $48/day against $5 left");
+  });
+
+  it("warns on a spike against the day's pace", () => {
+    const log = [
+      { project: "a", from: hours(-24).toISOString(), to: hours(-1).toISOString(), usd: 0.2 },
+      { project: "a", from: hours(-1).toISOString(), to: t0.toISOString(), usd: 0.2 },
+    ];
+    const s = assess(base({ balanceUsd: 100, meterLog: log }), t0);
+    assert.ok(s.reasons.some((r) => /spiked/.test(r)), s.reasons.join("; "));
+    const steady = [{ project: "a", from: hours(-1).toISOString(), to: t0.toISOString(), usd: 0.2 }];
+    assert.ok(!assess(base({ balanceUsd: 100, meterLog: steady }), t0).reasons.some((r) => /spiked/.test(r)), "no history, no spike");
+  });
+
+  it("reads usage from Cloudflare, charges it once, and keeps going when a read fails", async () => {
+    const cf = fakeCloudflare();
+    const fake = await serveFake(cf);
+    try {
+      const home = mkdtempSync(path.join(tmpdir(), "unlocal-meter-"));
+      const dir = mkdtempSync(path.join(tmpdir(), "unlocal-meter-site-"));
+      mkdirSync(path.join(dir, "dist"));
+      writeFileSync(path.join(dir, "dist", "index.html"), "<h1>hi</h1>");
+      writeFileSync(path.join(dir, "unlocal.json"), JSON.stringify({ project: "demo", cloud: "cloudflare", budget: { monthlyUsd: 5 }, resources: { web: { type: "site", path: "./dist" } } }));
+      const env = { UNLOCAL_HOME: home, CLOUDFLARE_API_TOKEN: "tok", CLOUDFLARE_ACCOUNT_ID: "acc", CLOUDFLARE_API_BASE: fake.base };
+      writeFileSync(path.join(home, "account.json"), JSON.stringify(base({ balanceUsd: 10 })));
+      const { up } = await import("../src/index.ts");
+      await up(dir, env, { sim: false });
+      const deployedAt = new Date();
+
+      cf.hit("demo-web", new Date(deployedAt.getTime() + 60_000), 10_000_000); // $3.00
+      const later = new Date(deployedAt.getTime() + 2 * 3_600_000);
+      const first = await meterUsage(env, later);
+      assert.equal(first.errors.length, 0);
+      assert.equal(first.chargedUsd, 3);
+      assert.deepEqual(first.lines.map((l) => [l.resource, l.metric, l.quantity]), [["web", "workerRequests", 10_000_000]]);
+      assert.equal((await loadAccount(env)).balanceUsd, 7);
+
+      const again = await meterUsage(env, later);
+      assert.equal(again.usd, 0, "the same window is never charged twice");
+
+      const broken = await meterUsage({ ...env, CLOUDFLARE_API_TOKEN: "wrong" }, new Date(later.getTime() + 3_600_000));
+      assert.equal(broken.errors.length, 1, "a failed read is reported, not fatal");
+      const entry = (await loadAccount(env)).projects[path.resolve(dir)]!;
+      assert.equal(entry.meteredAt, new Date(later.getTime() - METER_LAG_MS).toISOString(), "and retried from the same point");
+    } finally {
+      fake.close();
+    }
+  });
+});
+
+describe("account lock", () => {
+  it("never loses a write when many writers run at once", async () => {
+    const env = { UNLOCAL_HOME: mkdtempSync(path.join(tmpdir(), "unlocal-lock-")) };
+    await Promise.all(Array.from({ length: 25 }, () => withAccount(env, (a) => void (a.balanceUsd += 1))));
+    assert.equal((await loadAccount(env)).balanceUsd, 25);
+  });
+
+  it("doesn't save when the change throws", async () => {
+    const env = { UNLOCAL_HOME: mkdtempSync(path.join(tmpdir(), "unlocal-lock-")) };
+    await assert.rejects(withAccount(env, (a) => { a.balanceUsd = 99; throw new Error("no"); }));
+    assert.equal((await loadAccount(env)).balanceUsd, 0);
+    await withAccount(env, () => {}); // and the lock was released
+  });
+});
+
+describe("process lock", () => {
+  const lockable = () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "unlocal-flock-"));
+    return { dir, file: path.join(dir, "state.json") };
+  };
+
+  it("serializes read-modify-write cycles on one file", async () => {
+    const { file } = lockable();
+    writeFileSync(file, "0");
+    await Promise.all(Array.from({ length: 25 }, () => withLock(file, async () => {
+      const n = Number(readFileSync(file, "utf8"));
+      await new Promise((r) => setTimeout(r, 1));
+      writeFileSync(file, String(n + 1));
+    })));
+    assert.equal(readFileSync(file, "utf8"), "25");
+  });
+
+  it("takes over a lock whose holder stopped refreshing it", async () => {
+    const { file } = lockable();
+    mkdirSync(`${file}.lock`);
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(`${file}.lock`, old, old);
+    assert.equal(await withLock(file, () => "ran", { staleMs: 1_000, waitMs: 1_000 }), "ran");
+  });
+
+  it("fails BUSY rather than running beside a live holder", async () => {
+    const { file } = lockable();
+    mkdirSync(`${file}.lock`);
+    await assert.rejects(withLock(file, () => "no", { waitMs: 100, staleMs: 60_000 }), { code: "BUSY" });
+  });
+});
+
+describe("credentials", () => {
+  it("fills in connected credentials, but the environment wins", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "unlocal-creds-"));
+    assert.equal(withCredentials({ UNLOCAL_HOME: home }).CLOUDFLARE_API_TOKEN, undefined);
+    await saveCredentials({ cloudflare: { apiToken: "saved", accountId: "acc" } }, { UNLOCAL_HOME: home });
+    assert.equal(withCredentials({ UNLOCAL_HOME: home }).CLOUDFLARE_API_TOKEN, "saved");
+    assert.equal(withCredentials({ UNLOCAL_HOME: home, CLOUDFLARE_API_TOKEN: "env" }).CLOUDFLARE_API_TOKEN, "env");
   });
 });
 

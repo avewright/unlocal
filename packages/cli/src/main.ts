@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import {
   CLOUDS,
@@ -12,7 +13,16 @@ import {
   UnlocalError,
   VERSION,
   checkBudget,
+  assess,
   createPlan,
+  runGuard,
+  settledAccount,
+  stopEverything,
+  unfreezeAccount,
+  type GuardStatus,
+  type PausedProject,
+  defaultProjectName,
+  up,
   estimateResource,
   liveSpendUsd,
   openProject,
@@ -22,7 +32,7 @@ import {
   loadAccount,
   parseConfig,
   round2,
-  saveAccount,
+  withAccount,
   type ApplyEvent,
   type Cloud,
   type CostEstimate,
@@ -30,6 +40,7 @@ import {
   type ProjectConfig,
 } from "@unlocal/core";
 import { startConsole } from "@unlocal/console";
+import { serveMcp } from "./mcp.ts";
 import { renderCost, renderPlan, renderStatus, usd } from "./render.ts";
 
 /**
@@ -49,6 +60,8 @@ const OPTIONS = {
   "allow-data-loss": { type: "boolean", default: false },
   out: { type: "string" },
   plan: { type: "string" },
+  "plan-id": { type: "string" },
+  "dry-run": { type: "boolean", default: false },
   project: { type: "string" },
   budget: { type: "string" },
   port: { type: "string" },
@@ -66,6 +79,8 @@ interface Flags {
   "allow-data-loss": boolean;
   out?: string;
   plan?: string;
+  "plan-id"?: string;
+  "dry-run": boolean;
   project?: string;
   budget?: string;
   port?: string;
@@ -106,11 +121,6 @@ function progress(ctx: Ctx) {
   };
 }
 
-function defaultProjectName(dir: string): string {
-  const base = path.basename(path.resolve(dir)).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^[^a-z]+|-+$/g, "").slice(0, 32);
-  return NAME_PATTERN.test(base) ? base : "my-app";
-}
-
 function costEstimates(config: ProjectConfig) {
   const estimates: Record<string, CostEstimate> = {};
   for (const [name, spec] of Object.entries(config.resources)) estimates[name] = estimateResource(spec, config.cloud, config.region);
@@ -119,6 +129,28 @@ function costEstimates(config: ProjectConfig) {
 }
 
 const COMMANDS: Record<string, Command> = {
+  up: {
+    summary: "Put this folder's site online and print its URL (writes unlocal.json if needed)",
+    flags: [`--cloud <${CLOUDS.join("|")}>  for a new unlocal.json; default cloudflare`],
+    async run(ctx) {
+      const r = await up(ctx.dir, ctx.env, {
+        sim: ctx.flags.sim,
+        cloud: ctx.flags.cloud as Cloud | undefined,
+        onEvent: progress(ctx),
+        log: (m) => ctx.progress(`    ${m}`),
+      });
+      const { plan } = r;
+      const lines: string[] = [];
+      if (r.createdConfig) lines.push(`Wrote ${r.createdConfig} (${CLOUDS_INFO[plan.cloud].name}, ${usd(plan.budget.limitUsd)}/mo budget)`, "");
+      lines.push(r.url ? `${r.applied.length ? "Live" : "Already live"} at ${r.url}` : r.applied.length ? "Deployed." : "Nothing to deploy.");
+      if (r.applied.length) {
+        lines.push("", `  ${usd(plan.cost.projectedMonthlyUsd)}/mo of ${usd(plan.budget.limitUsd)}/mo budget`);
+        if (plan.cap && !ctx.flags.sim) lines.push(`  ${usd(plan.cap.projectedUsd)}/mo of ${usd(plan.cap.limitUsd)}/mo account cap`);
+      }
+      return { data: r, human: lines.join("\n") };
+    },
+  },
+
   init: {
     summary: "Create unlocal.json with a starter static site",
     flags: ["--project <name>", "--budget <usd>", `--cloud <${CLOUDS.join("|")}>`],
@@ -182,7 +214,7 @@ const COMMANDS: Record<string, Command> = {
       } else if (plan.hasChanges && !plan.budget.withinBudget) {
         human += "\n\nReduce resources or raise budget.monthlyUsd before applying.";
       } else if (plan.hasChanges && plan.cap && !plan.cap.withinCap) {
-        human += "\n\nReduce resources or raise the account cap before applying.";
+        human += "\n\nReduce resources, or a human raises the account cap with `unlocal cap <usd>`.";
       } else if (plan.hasChanges) {
         human += `\n\nApply with: unlocal apply --yes${plan.destructive ? " --allow-data-loss" : ""}`;
       }
@@ -192,7 +224,12 @@ const COMMANDS: Record<string, Command> = {
 
   apply: {
     summary: "Make infrastructure match unlocal.json",
-    flags: ["--yes  approve the current plan", "--plan <file>  apply a saved plan (refused if anything changed)", "--allow-data-loss"],
+    flags: [
+      "--yes  approve the current plan",
+      "--plan-id <id>  approve exactly the plan you reviewed (refused if anything changed)",
+      "--plan <file>  apply a saved plan (refused if anything changed)",
+      "--allow-data-loss",
+    ],
     async run(ctx) {
       const project = await openProject(ctx.dir, ctx.env);
       const { config, state } = project;
@@ -212,6 +249,13 @@ const COMMANDS: Record<string, Command> = {
           throw new UnlocalError("PLAN_STALE", "unlocal.json or infrastructure changed since this plan was saved", {
             details: { savedPlanId: saved.plan.id, currentPlanId: plan.id },
             hint: "run `unlocal plan --out <file>` again and review it",
+          });
+        }
+      } else if (ctx.flags["plan-id"] !== undefined) {
+        if (ctx.flags["plan-id"] !== plan.id) {
+          throw new UnlocalError("PLAN_STALE", "unlocal.json or infrastructure changed since that plan was made", {
+            details: { reviewedPlanId: ctx.flags["plan-id"], currentPlanId: plan.id },
+            hint: "run `unlocal plan` again and review the new plan",
           });
         }
       } else if (plan.hasChanges && !ctx.flags.yes) {
@@ -304,19 +348,34 @@ const COMMANDS: Record<string, Command> = {
     },
   },
 
+  mcp: {
+    summary: "Serve unlocal to AI agents over MCP (stdio)",
+    flags: [],
+    async run(ctx) {
+      await serveMcp({ env: ctx.env, sim: ctx.flags.sim });
+      return { data: null, human: "" };
+    },
+  },
+
   cap: {
     summary: "Show or set the account-wide monthly spending cap (humans only)",
     args: "[usd]",
     flags: [],
     async run(ctx) {
-      const account = await loadAccount(ctx.env);
+      let account = await settledAccount(ctx.env);
       if (ctx.args[0] !== undefined) {
         const value = Number(ctx.args[0]);
         if (!Number.isFinite(value) || value <= 0 || value > MAX_CAP_USD) {
           throw new UnlocalError("USAGE", `cap must be a number between 0 and ${MAX_CAP_USD}`, { hint: "e.g. `unlocal cap 10`" });
         }
-        account.monthlyCapUsd = value;
-        await saveAccount(account, ctx.env);
+        // Lowering the cap only reduces risk, so anyone may. Setting or raising it takes a person.
+        if (account.monthlyCapUsd === null || value > account.monthlyCapUsd) {
+          await confirmByHuman(`Type ${value} to set the cap to ${usd(value)}/mo: `, String(value));
+        }
+        account = await withAccount(ctx.env, (a) => {
+          a.monthlyCapUsd = value;
+          return a;
+        });
       }
       const committed = liveSpendUsd(account);
       const projects = Object.entries(account.projects)
@@ -327,18 +386,95 @@ const COMMANDS: Record<string, Command> = {
         liveMonthlyUsd: committed,
         headroomUsd: account.monthlyCapUsd === null ? null : round2(account.monthlyCapUsd - committed),
         projects,
+        balanceUsd: account.balanceUsd,
+        guard: assess(account),
       };
       const lines = [account.monthlyCapUsd === null ? "No cap set. Real deploys are refused until one is: unlocal cap <usd>" : `Cap ${usd(account.monthlyCapUsd)}/mo`];
       if (projects.length) {
         lines.push("");
+        const where = (p: (typeof projects)[number]) => (p.live ? p.cloud : "sim");
         const w = Math.max(...projects.map((p) => p.project.length));
-        for (const p of projects) lines.push(`  ${p.project.padEnd(w)}  ${(p.live ? p.cloud : "sim").padEnd(5)}  ${usd(p.monthlyUsd).padStart(7)}/mo`);
+        const cw = Math.max(...projects.map((p) => where(p).length));
+        const mw = Math.max(...projects.map((p) => usd(p.monthlyUsd).length));
+        for (const p of projects) lines.push(`  ${p.project.padEnd(w)}  ${where(p).padEnd(cw)}  ${usd(p.monthlyUsd).padStart(mw)}/mo`);
       }
       if (account.monthlyCapUsd !== null) lines.push("", `  ${usd(committed)}/mo live · ${usd(data.headroomUsd!)} left`);
+      lines.push(...guardLines(data.guard));
       return { data, human: lines.join("\n") };
     },
   },
+
+  guard: {
+    summary: "Check spending now; pause live projects and freeze deploys if money is about to run out",
+    flags: ["--dry-run  report only, change nothing"],
+    async run(ctx) {
+      const r = await runGuard(ctx.env, { dryRun: ctx.flags["dry-run"] });
+      const s = r.status;
+      const lines = [
+        s.runwayDays === null
+          ? `Nothing live is costing money. Balance ${usd((await loadAccount(ctx.env)).balanceUsd)}.`
+          : `Burning ${usd(s.burnPerDayUsd)}/day${s.meteredPerDayUsd > 0 ? ` (${usd(s.meteredPerDayUsd)} measured)` : ""} · balance lasts ${s.runwayDays} days · ${usd(s.monthToDateUsd)} spent this month`,
+        ...guardLines(s),
+        ...(r.metered?.errors ?? []).map((e) => `  ! couldn't read ${e.project}'s usage: ${e.error}`),
+        ...pausedLines(r.paused),
+      ];
+      if (s.level === "pause" && ctx.flags["dry-run"]) lines.push("", "Dry run: nothing was paused.");
+      return { data: r, human: lines.join("\n") };
+    },
+  },
+
+  freeze: {
+    summary: "Kill switch: freeze deploys and take every live site and service offline (databases are kept)",
+    flags: [],
+    async run(ctx) {
+      const paused = await stopEverything(ctx.env);
+      return { data: { paused }, human: ["Frozen. Nothing new deploys until a human runs `unlocal unfreeze`.", ...pausedLines(paused)].join("\n") };
+    },
+  },
+
+  unfreeze: {
+    summary: "Allow deploys again after a freeze (humans only)",
+    flags: [],
+    async run(ctx) {
+      await confirmByHuman("Type unfreeze to allow deploys again: ", "unfreeze");
+      await unfreezeAccount(ctx.env);
+      return { data: { frozen: null }, human: "Unfrozen. `unlocal apply --yes` brings paused projects back." };
+    },
+  },
 };
+
+/**
+ * Some commands need a person at a keyboard: they're refused without an interactive
+ * terminal, which agents' shells don't have. A speed bump, not a security boundary.
+ */
+async function confirmByHuman(prompt: string, expected: string): Promise<void> {
+  if (!process.stdin.isTTY || !process.stderr.isTTY) {
+    throw new UnlocalError("HUMAN_REQUIRED", "only a person can do this, from an interactive terminal or the console", {
+      hint: "ask the human to run this command themselves, or to use `unlocal console`",
+    });
+  }
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = await rl.question(prompt).catch(() => ""); // Ctrl-C / Ctrl-D
+    if (answer.trim() !== expected) throw new UnlocalError("USAGE", "not confirmed; nothing changed");
+  } finally {
+    rl.close();
+  }
+}
+
+function guardLines(s: GuardStatus): string[] {
+  const lines = s.reasons.map((r) => `  ${s.level === "pause" ? "✗" : "!"} ${r}`);
+  if (s.frozen) lines.push(`  ✗ deploys frozen since ${s.frozen.at.slice(0, 16).replace("T", " ")}: ${s.frozen.reason}`);
+  return lines.length ? ["", ...lines] : [];
+}
+
+function pausedLines(paused: PausedProject[]): string[] {
+  if (!paused.length) return [];
+  return ["", ...paused.map((p) =>
+    p.error
+      ? `  ✗ ${p.project}: couldn't pause: ${p.error}`
+      : `  ${p.project}: ${p.stopped.length ? `${p.how === "paused" ? "paused" : "took offline"} ${p.stopped.join(", ")}` : "nothing to stop"}${p.kept.length ? `; kept database ${p.kept.join(", ")}` : ""}`)];
+}
 
 const GLOBAL_FLAGS = ["--json", "--dir <path>", "--sim  deploy to a simulated cloud"];
 
@@ -424,7 +560,8 @@ export async function run(
   };
   try {
     const result = await cmd.run(ctx);
-    io.stdout(json ? JSON.stringify({ ok: true, command, data: result.data }, null, 2) : result.human);
+    if (json) io.stdout(JSON.stringify({ ok: true, command, data: result.data }, null, 2));
+    else if (result.human) io.stdout(result.human);
     return result.exitCode ?? 0;
   } catch (err) {
     if (err instanceof UnlocalError) return fail(err);

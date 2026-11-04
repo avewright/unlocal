@@ -1,14 +1,18 @@
 # unlocal
 
-**A cloud account your agents can safely operate.** Describe sites, services and databases in one file; unlocal shows what it will cost, enforces a hard budget, and deploys to AWS, Google Cloud, Azure or Oracle Cloud, with one bill.
+**A cloud account your agents can safely operate.** Describe sites, services and databases in one file; unlocal shows what it will cost, enforces a hard budget, and deploys to Cloudflare, AWS, Google Cloud, Azure or Oracle Cloud, with one bill.
 
 ```bash
-unlocal init --cloud gcp        # aws | gcp | azure | oci
+unlocal up                      # after a cap is set: this folder's built site → a live URL
+unlocal init --cloud gcp        # aws | gcp | azure | oci | cloudflare
 unlocal cap 10                  # account-wide ceiling across every project (set by a human)
 unlocal plan                    # what changes, what it costs, budget headroom
 unlocal apply --yes             # deploy (--sim to simulate)
 unlocal status                  # URLs, connection info, spend
-unlocal console                 # add funds, set the cap, deploy
+unlocal guard                   # check burn and runway; pauses everything before money runs out
+unlocal freeze                  # kill switch: take everything offline, freeze deploys
+unlocal console                 # add funds, set the cap, connect clouds, see spending
+unlocal mcp                     # the same, for MCP clients (Claude, Cursor, …)
 ```
 
 ```json
@@ -17,7 +21,7 @@ unlocal console                 # add funds, set the cap, deploy
   "cloud": "gcp",
   "budget": { "monthlyUsd": 75 },
   "resources": {
-    "web": { "type": "site", "path": "./web/dist", "spa": true, "domain": "shop.example.com" },
+    "web": { "type": "site", "path": "./web/dist", "spa": true },
     "api": { "type": "service", "source": "./api", "port": 8080, "instances": 2 },
     "db":  { "type": "postgres", "size": "small", "storageGb": 20 }
   }
@@ -39,7 +43,12 @@ See [docs/agent-contract.md](docs/agent-contract.md) for the full contract.
 
 ## Status
 
-Early prototype. **AWS static sites deploy for real** (S3 + CloudFront). Everything else (services, Postgres, custom domains, other clouds) runs with `--sim` and fails with `PROVIDER_UNAVAILABLE` live, before any change is made. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Early prototype. **Static sites deploy for real** on Cloudflare (Workers static assets, free) and AWS (S3 + CloudFront). Everything else (services, Postgres, custom domains, other clouds) runs with `--sim` and fails with `PROVIDER_UNAVAILABLE` live, before any change is made. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+What the cap does and doesn't do today:
+- Spend is estimated from list prices, not metered from the cloud's bill. Traffic, egress and requests aren't counted yet.
+- The cap, wallet and guard are local files and processes. They stop a cooperative or confused agent: raising the cap or unfreezing needs a typed confirmation at a real terminal. An agent determined to edit `~/.unlocal` by hand isn't stopped. That takes the hosted account, still to come.
+- The guard runs while `unlocal console` is open, or when `unlocal guard` runs. Nothing watches spend while neither is running.
 
 ## Development
 

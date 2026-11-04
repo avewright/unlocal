@@ -25,4 +25,14 @@ export interface Provider {
   create(ctx: ProviderContext, name: string, spec: ResourceSpec): Promise<Outputs>;
   update(ctx: ProviderContext, name: string, before: ResourceSpec, after: ResourceSpec, outputs: Outputs): Promise<Outputs>;
   delete(ctx: ProviderContext, name: string, spec: ResourceSpec, outputs: Outputs): Promise<void>;
+  /**
+   * Take a site or service offline without deleting it, so it stops costing money and
+   * `update` brings it back quickly. Providers without it are paused by deleting.
+   */
+  pause?(ctx: ProviderContext, name: string, spec: ResourceSpec, outputs: Outputs): Promise<Outputs>;
+  /**
+   * Usage the cloud measured in [from, to), as metric → quantity. Metrics are priced by
+   * the cloud's `meters` in clouds.ts; anything not listed there is ignored.
+   */
+  usage?(ctx: ProviderContext, name: string, spec: ResourceSpec, outputs: Outputs, window: { from: Date; to: Date }): Promise<Record<string, number>>;
 }

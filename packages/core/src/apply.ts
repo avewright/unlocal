@@ -55,7 +55,7 @@ export function assertApplicable(plan: Plan, state: ProjectState, options: Guard
   if (options.enforceCap) {
     if (!plan.cap) {
       throw new UnlocalError("CAP_NOT_SET", "real deploys need an account-wide spending cap first", {
-        hint: "a human sets it once with `unlocal cap <usd>`, the most all projects together may cost per month",
+        hint: "a human sets it once, in `unlocal console` or with `unlocal cap <usd>`: the most all projects together may cost per month",
       });
     }
     if (!plan.cap.withinCap) {
@@ -96,6 +96,7 @@ export async function applyPlan(plan: Plan, state: ProjectState, options: ApplyO
 
   // Refuse up front, before touching anything, if the provider can't do every step.
   const pending = plan.actions.filter((a) => a.kind !== "noop");
+  if (pending.length === 0) return { state, applied: [] };
   for (const action of pending) {
     const spec = action.after ?? action.before!;
     const reason = provider.unsupported?.(spec);
@@ -106,7 +107,7 @@ export async function applyPlan(plan: Plan, state: ProjectState, options: ApplyO
       });
     }
   }
-  if (pending.length > 0) await provider.preflight?.(ctxFor(null));
+  await provider.preflight?.(ctxFor(null));
 
   const next: ProjectState = structuredClone(state);
   next.serial = state.serial + 1;
@@ -132,8 +133,9 @@ export async function applyPlan(plan: Plan, state: ProjectState, options: ApplyO
           const outputs = await provider.update(
             ctxFor(action.to), action.name, existing!.spec, action.after!, existing!.outputs,
           );
+          const { paused: _resumed, ...rest } = existing!;
           next.resources[action.name] = {
-            ...existing!, spec: action.after!, outputs, monthlyUsd: action.monthlyUsdAfter,
+            ...rest, spec: action.after!, outputs, monthlyUsd: action.monthlyUsdAfter,
             fingerprint: action.fingerprint, updatedAt: now(),
           };
           break;
@@ -164,6 +166,5 @@ export async function applyPlan(plan: Plan, state: ProjectState, options: ApplyO
     onEvent?.({ phase: "done", action });
   }
 
-  if (applied.length === 0) await persist(next);
   return { state: next, applied };
 }

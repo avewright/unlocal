@@ -52,7 +52,7 @@ export function renderStatus(state: ProjectState, pending: number, budget: Budge
   if (names.length === 0) lines.push("  Nothing deployed yet. Run `unlocal plan` then `unlocal apply --yes`.");
   for (const name of names) {
     const r = state.resources[name]!;
-    lines.push(`  ${name}  ${r.type}  ${r.cloud} ${r.region}  ${usd(r.monthlyUsd)}/mo`);
+    lines.push(`  ${name}  ${r.type}  ${r.cloud} ${r.region}  ${usd(r.monthlyUsd)}/mo${r.paused ? "  paused" : ""}`);
     for (const [k, v] of Object.entries(r.outputs)) lines.push(`      ${k}: ${v}`);
   }
   const total = Object.values(state.resources).reduce((s, r) => s + r.monthlyUsd, 0);

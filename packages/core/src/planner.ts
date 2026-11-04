@@ -96,6 +96,7 @@ export function createPlan(config: ProjectConfig, state: ProjectState, options: 
     };
     const changes = changedFields(existing.spec, spec);
     if (fingerprint !== undefined && fingerprint !== existing.fingerprint) changes.push("files");
+    if (existing.paused) changes.push("paused"); // resuming is an update
     const reason = replaceReason(existing, spec, config.cloud, config.region);
     if (reason) {
       actions.push({ ...base, kind: "replace", reason, changes, destructive: existing.type === "postgres" });

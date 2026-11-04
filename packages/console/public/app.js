@@ -112,9 +112,12 @@ async function renderApp() {
   }
   const testMode = data.payments === "test";
 
+  const g = data.guard;
   const balance = h("div", { class: "stat" },
     h("div", { class: "label" }, "Balance"),
     h("div", { class: "value num" }, usd(data.balanceUsd)),
+    g.runwayDays !== null && h("div", { class: "muted num" },
+      `Lasts about ${g.runwayDays < 1 ? "less than a day" : `${Math.floor(g.runwayDays)} days`} at ${usd(g.burnPerDayUsd)}/day`),
     inlineForm({
       type: "number", value: "20", label: testMode ? "Add test credit" : "Add funds",
       attrs: { min: "5", max: "1000", step: "1", inputmode: "decimal" },
@@ -126,9 +129,13 @@ async function renderApp() {
     }),
   );
 
+  const used = data.monthlyCapUsd ? Math.min(1, data.liveMonthlyUsd / data.monthlyCapUsd) : 0;
   const cap = h("div", { class: "stat" },
     h("div", { class: "label" }, "Monthly cap"),
     h("div", { class: "value num" }, data.monthlyCapUsd === null ? "None" : usd(data.monthlyCapUsd)),
+    data.monthlyCapUsd !== null && h("div", { class: "meter", role: "meter", "aria-label": "Committed spend", "aria-valuemin": "0", "aria-valuemax": String(data.monthlyCapUsd), "aria-valuenow": String(data.liveMonthlyUsd) },
+      h("div", { class: used >= 0.8 ? "fill warn" : "fill", style: `width:${(used * 100).toFixed(1)}%` })),
+    data.monthlyCapUsd !== null && h("div", { class: "muted num" }, `${usd(data.liveMonthlyUsd)} committed · ${usd(Math.max(0, data.monthlyCapUsd - data.liveMonthlyUsd))} left`),
     inlineForm({
       type: "number", value: data.monthlyCapUsd ?? "", placeholder: "10",
       label: data.monthlyCapUsd === null ? "Set" : "Change",
@@ -139,6 +146,20 @@ async function renderApp() {
       },
     }),
   );
+
+  const spending = data.spend.length
+    ? [h("h2", {}, "Spending"), h("div", { class: "list" }, data.spend.map((r) => h("div", { class: "item" },
+        h("div", { class: "main" }, h("div", { class: "name" }, r.name), h("div", { class: "muted" }, `${r.projects} project${r.projects === 1 ? "" : "s"}`)),
+        h("div", { class: "num" }, `${usd(r.monthlyUsd)}/mo`),
+      )))]
+    : [];
+
+  const cf = data.connections.cloudflare;
+  const clouds = h("div", { class: "list" }, cf.connected
+    ? h("div", { class: "item" },
+        h("div", { class: "main" }, h("div", { class: "name" }, "Cloudflare"), h("div", { class: "muted" }, cf.source === "env" ? "From CLOUDFLARE_API_TOKEN" : `Account ${cf.accountId}`)),
+        cf.source === "console" && h("button", { onclick: async () => { await api("POST", "/api/disconnect/cloudflare"); renderApp(); } }, "Disconnect"))
+    : connectCloudflare());
 
   const projects = h("div", { class: "list" },
     data.projects.map((p) => p.error
@@ -166,8 +187,8 @@ async function renderApp() {
   const activity = data.transactions.length
     ? [h("h2", {}, "Activity"), h("div", { class: "list" }, data.transactions.map((t) => h("div", { class: "item" },
         h("div", { class: "main muted num" }, new Date(t.at).toLocaleString()),
-        h("div", {}, t.kind === "credit" ? "Test credit" : "Added funds"),
-        h("div", { class: "num ok" }, `+${usd(t.amountUsd)}`),
+        h("div", {}, t.kind === "charge" ? "Usage" : t.kind === "credit" ? "Test credit" : "Added funds"),
+        t.kind === "charge" ? h("div", { class: "num muted" }, `−${usd(t.amountUsd)}`) : h("div", { class: "num ok" }, `+${usd(t.amountUsd)}`),
       )))]
     : [];
 
@@ -177,11 +198,56 @@ async function renderApp() {
       data.login && h("span", { class: "muted" }, data.user.email),
       data.login && h("button", { class: "link", onclick: async () => { await api("POST", "/api/logout"); boot(); } }, "Log out"),
     ),
+    alert(g),
     h("section", { class: "stats" }, balance, cap),
+    ...spending,
+    h("h2", {}, "Clouds"),
+    clouds,
     h("h2", {}, "Projects"),
     projects,
     ...activity,
+    h("div", { class: "kill" }, h("button", {
+      class: "danger",
+      onclick: async () => {
+        if (!confirm("Take every live site and service offline and freeze deploys? Databases are kept.")) return;
+        await api("POST", "/api/stop");
+        renderApp();
+      },
+    }, "Stop everything")),
   ));
+}
+
+/** What the guard found, and the one action that resolves a freeze. */
+function alert(g) {
+  if (g.level === "ok" && !g.frozen) return null;
+  const lines = [...g.reasons, ...(g.frozen ? [`Deploys are frozen: ${g.frozen.reason}.`] : [])];
+  return h("div", { class: g.level === "pause" || g.frozen ? "alert stop" : "alert" },
+    h("div", { class: "main" }, lines.map((l) => h("div", {}, l[0].toUpperCase() + l.slice(1)))),
+    g.frozen && h("button", { onclick: async () => { await api("POST", "/api/unfreeze"); renderApp(); } }, "Unfreeze"),
+  );
+}
+
+/** Two fields and a button; the server checks the token with Cloudflare before saving it. */
+function connectCloudflare() {
+  const accountId = h("input", { placeholder: "Account ID", "aria-label": "Cloudflare account ID", autocomplete: "off", spellcheck: "false" });
+  const token = h("input", { type: "password", placeholder: "API token", "aria-label": "Cloudflare API token", autocomplete: "off" });
+  const button = h("button", { class: "primary" }, "Connect");
+  const error = h("div", { class: "err" });
+  return h("form", {
+    class: "connect",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      button.disabled = true;
+      error.textContent = "";
+      try {
+        await api("POST", "/api/connect/cloudflare", { accountId: accountId.value, apiToken: token.value });
+        await renderApp();
+      } catch (err) {
+        error.textContent = errorText(err);
+        button.disabled = false;
+      }
+    },
+  }, h("div", { class: "name" }, "Cloudflare"), h("div", { class: "row" }, accountId, token, button), error);
 }
 
 // ── Deploy ─────────────────────────────────────────────────────────────────

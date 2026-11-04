@@ -32,6 +32,13 @@ export interface CloudInfo {
   native: Partial<Record<ResourceType, string>>;
   /** On-demand list prices in USD for defaultRegion. */
   rates: CloudRates;
+  /** Prices for usage the provider measures (see meter.ts), keyed by the metric it reports. */
+  meters?: Record<string, Meter>;
+}
+
+export interface Meter {
+  label: string;
+  usdPerUnit: number;
 }
 
 // Prices checked 2026-11. Values marked "unverified" are estimates: confirm them before launch.
@@ -104,6 +111,12 @@ export const CLOUDS_INFO: Record<Cloud, CloudInfo> = {
     rates: {
       // Workers Free: static asset requests are free and unlimited; DNS is free.
       site: { hostingMonth: 0, dnsZoneMonth: 0 },
+    },
+    meters: {
+      // Requests that reach Worker code (not static files). Workers Paid list price, checked
+      // 2026-11-04. Priced from the first request, ignoring the 10M/month included, so the
+      // guard errs high. On Workers Free these requests stop at the daily limit instead.
+      workerRequests: { label: "Worker requests", usdPerUnit: 0.3 / 1_000_000 },
     },
   },
 };

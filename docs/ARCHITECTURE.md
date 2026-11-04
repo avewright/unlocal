@@ -42,16 +42,18 @@ CLI  ·  MCP server  ·  REST API  ·  dashboard
 Customers top up a wallet; unlocal resells cloud usage plus a platform fee (`PLATFORM_FEE_RATE`, placeholder 10%). Prepaid removes credit risk and fraud exposure while keeping "one bill". Per-customer member accounts give clean cost attribution and isolation.
 
 ### Provider mapping (source of truth: `CLOUDS_INFO` in clouds.ts)
-| unlocal | AWS | Google Cloud | Azure | Oracle Cloud |
-|---|---|---|---|---|
-| `site` | S3 + CloudFront | Firebase Hosting | Static Web Apps | Object Storage + Load Balancer |
-| `service` | ECS Fargate + ALB | Cloud Run | Container Apps | Container Instances + Load Balancer |
-| `postgres` | RDS for PostgreSQL | Cloud SQL | Database for PostgreSQL | Database with PostgreSQL |
+| unlocal | AWS | Google Cloud | Azure | Oracle Cloud | Cloudflare |
+|---|---|---|---|---|---|
+| `site` | S3 + CloudFront | Firebase Hosting | Static Web Apps | Object Storage + Load Balancer | Workers static assets |
+| `service` | ECS Fargate + ALB | Cloud Run | Container Apps | Container Instances + Load Balancer | not offered |
+| `postgres` | RDS for PostgreSQL | Cloud SQL | Database for PostgreSQL | Database with PostgreSQL | not offered |
+
+A type a cloud doesn't offer is a `CONFIG_INVALID` error naming what it does offer. Cloudflare credentials come from `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit, plus Account Analytics: Read for metering) and `CLOUDFLARE_ACCOUNT_ID`; every Worker unlocal deploys carries the `UNLOCAL_ASSETS` binding, and unlocal refuses to overwrite or delete a Worker without it.
 
 Credentials surface as `secret://` refs on every cloud. Prices marked "unverified" in clouds.ts (Oracle Postgres; Azure and Google larger database sizes) must be confirmed before launch.
 
 ## Roadmap
-1. **Live `site` providers**: real static deploys with HTTPS on each cloud, starting with AWS.
+1. **Live `site` providers**: real static deploys with HTTPS on each cloud. Done: AWS, Cloudflare.
 2. `unlocal logs`, `unlocal secret set`, file upload for site contents.
 3. **MCP server** exposing plan/apply/status with the same guardrails.
 4. Live `service` and `postgres` providers on all four clouds.

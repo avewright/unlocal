@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -150,6 +150,66 @@ describe("console", () => {
     assert.equal(await deploy(), "FUNDS_INSUFFICIENT");
     await api("POST", "/api/funds", { usd: 10 });
     assert.equal(await deploy(), "PROVIDER_UNAVAILABLE");
+  });
+
+  it("connects Cloudflare only after Cloudflare accepts the token, and never shows it back", async () => {
+    const cf = createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      const okToken = req.headers.authorization === "Bearer good-token";
+      if (!okToken) {
+        res.statusCode = 403;
+        return res.end(JSON.stringify({ success: false, errors: [{ code: 10000, message: "Authentication error" }] }));
+      }
+      res.end(JSON.stringify({ success: true, errors: [], result: { subdomain: "owner" } }));
+    });
+    await new Promise<void>((r) => cf.listen(0, "127.0.0.1", r));
+    try {
+      const base = await fresh({ CLOUDFLARE_API_BASE: `http://127.0.0.1:${(cf.address() as AddressInfo).port}/client/v4` });
+      const api = await setupOwner(base);
+      const accountId = "0123456789abcdef0123456789abcdef";
+      assert.equal((await api("POST", "/api/connect/cloudflare", { accountId: "short", apiToken: "x" })).status, 400);
+      assert.equal((await api("POST", "/api/connect/cloudflare", { accountId, apiToken: "bad" })).body.error.code, "CLOUD_AUTH");
+      assert.equal((await api("GET", "/api/overview")).body.connections.cloudflare.connected, false);
+
+      assert.equal((await api("POST", "/api/connect/cloudflare", { accountId, apiToken: "good-token" })).status, 200);
+      const o = (await api("GET", "/api/overview")).body;
+      assert.deepEqual(o.connections.cloudflare, { connected: true, source: "console", accountId });
+      assert.ok(!JSON.stringify(o).includes("good-token"));
+      const saved = JSON.parse(readFileSync(path.join(root, "home", "credentials.json"), "utf8"));
+      assert.equal(saved.cloudflare.apiToken, "good-token");
+      assert.equal(statSync(path.join(root, "home", "credentials.json")).mode & 0o777, 0o600);
+
+      await api("POST", "/api/disconnect/cloudflare");
+      assert.equal((await api("GET", "/api/overview")).body.connections.cloudflare.connected, false);
+    } finally {
+      cf.close();
+    }
+  });
+
+  it("sums committed spend by provider", async () => {
+    const base = await fresh();
+    const home = path.join(root, "home");
+    mkdirSync(home, { recursive: true });
+    const entry = (project: string, cloud: string, monthlyUsd: number, live = true) => ({ project, cloud, monthlyUsd, live, updatedAt: "" });
+    writeFileSync(path.join(home, "account.json"), JSON.stringify({
+      version: 1, monthlyCapUsd: 25, balanceUsd: 30, transactions: [],
+      projects: { "/a": entry("a", "gcp", 10), "/b": entry("b", "gcp", 6.18), "/c": entry("c", "cloudflare", 0), "/d": entry("d", "aws", 9, false) },
+    }));
+    const api = await setupOwner(base);
+    const o = (await api("GET", "/api/overview")).body;
+    assert.deepEqual(o.spend.map((r: { cloud: string; projects: number; monthlyUsd: number }) => [r.cloud, r.projects, r.monthlyUsd]), [["gcp", 2, 16.18], ["cloudflare", 1, 0]]);
+    assert.equal(o.liveMonthlyUsd, 16.18);
+  });
+
+  it("shows the guard, stops everything, and unfreezes", async () => {
+    const base = await fresh();
+    const api = await setupOwner(base);
+    assert.equal((await api("GET", "/api/overview")).body.guard.level, "ok");
+    assert.equal((await api("POST", "/api/stop")).status, 200);
+    assert.equal((await api("GET", "/api/overview")).body.guard.frozen.by, "human");
+    assert.equal((await api("POST", "/api/stop", {}, { origin: "https://evil.example" })).status, 403);
+    await api("POST", "/api/unfreeze");
+    assert.equal((await api("GET", "/api/overview")).body.guard.frozen, null);
   });
 
   it("credits a Stripe payment once, only after verifying it with Stripe", async () => {

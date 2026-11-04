@@ -21,6 +21,8 @@ export interface ResourceState {
   monthlyUsd: number;
   /** Content hash of a site's files when last deployed. */
   fingerprint?: string;
+  /** When the guard or kill switch took it offline without deleting it. The next apply resumes it. */
+  paused?: string;
   createdAt: string;
   updatedAt: string;
 }

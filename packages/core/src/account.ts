@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Cloud } from "./clouds.ts";
 import { UnlocalError } from "./errors.ts";
+import { withLock } from "./lock.ts";
 import { round2 } from "./pricing.ts";
 
 /**
@@ -19,12 +20,14 @@ export interface LedgerEntry {
   /** Deployed to a real cloud (counts against the cap and balance) vs simulated. */
   live: boolean;
   updatedAt: string;
+  /** Measured usage has been read from the cloud and charged up to this moment (see meter.ts). */
+  meteredAt?: string;
 }
 
 export interface Transaction {
   id: string;
-  /** `topup` = paid through Stripe; `credit` = development credit, no money moved. */
-  kind: "topup" | "credit";
+  /** `topup` = paid through Stripe; `credit` = development credit, no money moved; `charge` = usage taken from the balance. */
+  kind: "topup" | "credit" | "charge";
   amountUsd: number;
   at: string;
   /** External reference (e.g. Stripe Checkout session); makes crediting idempotent. */
@@ -38,6 +41,16 @@ export interface Account {
   /** Keyed by absolute project directory. */
   projects: Record<string, LedgerEntry>;
   transactions: Transaction[];
+  /** Usage has been charged to the balance up to this moment (see guard.ts). */
+  settledAt?: string;
+  /** While set, nothing new deploys. Only a human clears it. */
+  frozen?: { at: string; reason: string; by: "guard" | "human" } | null;
+  /** Recent live deploy times, for loop detection. */
+  deploys?: string[];
+  /** Measured spend per metering window, last 48 hours: the guard's live burn rate. */
+  meterLog?: { project: string; from: string; to: string; usd: number }[];
+  /** Fractions of a cent measured but not yet taken from the balance. */
+  meterCarryUsd?: number;
 }
 
 export interface CapStatus {
@@ -89,8 +102,22 @@ export async function saveAccount(account: Account, env: NodeJS.ProcessEnv = pro
   await rename(tmp, file);
 }
 
+/**
+ * Load, change and save the account under a lock, so the CLI, console, MCP server and
+ * guard running at once never lose each other's writes. Not re-entrant: don't nest calls.
+ * A change that throws is not saved.
+ */
+export async function withAccount<T>(env: NodeJS.ProcessEnv, fn: (account: Account) => T | Promise<T>): Promise<T> {
+  return withLock(accountFile(env), async () => {
+    const account = await loadAccount(env);
+    const result = await fn(account);
+    await saveAccount(account, env);
+    return result;
+  }, { what: "the account" });
+}
+
 /** Add money to the balance. Returns false (and changes nothing) if `ref` was already credited. */
-export function creditAccount(account: Account, amountUsd: number, kind: Transaction["kind"], ref?: string): boolean {
+export function creditAccount(account: Account, amountUsd: number, kind: "topup" | "credit", ref?: string): boolean {
   if (!Number.isFinite(amountUsd) || amountUsd < TOPUP_MIN_USD || amountUsd > TOPUP_MAX_USD) {
     throw new UnlocalError("USAGE", `amount must be between $${TOPUP_MIN_USD} and $${TOPUP_MAX_USD}`);
   }

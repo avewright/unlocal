@@ -63,6 +63,19 @@
   .stat .label { color: var(--muted); }
   .stat .value { font-size: 32px; line-height: 1; font-weight: 500; letter-spacing: -0.02em; }
   .stat form input { width: 100%; }
+  .meter { height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; }
+  .meter .fill { height: 100%; background: var(--fg); border-radius: 3px; }
+  .meter .fill.warn { background: var(--err); }
+  .alert { display: flex; align-items: center; gap: 16px; margin-top: 24px; padding: 14px 16px; border-radius: 12px; border: 1px solid color-mix(in srgb, #d97706 40%, transparent); background: color-mix(in srgb, #d97706 10%, var(--panel)); }
+  .alert.stop { border-color: color-mix(in srgb, var(--err) 45%, transparent); background: color-mix(in srgb, var(--err) 10%, var(--panel)); }
+  .alert .main { flex: 1; display: grid; gap: 4px; }
+  .kill { display: flex; justify-content: center; }
+  button.danger { color: var(--err); background: none; border-color: color-mix(in srgb, var(--err) 35%, transparent); }
+  button.danger:hover { background: color-mix(in srgb, var(--err) 10%, transparent); }
+  .connect { display: grid; gap: 10px; padding: 14px 16px; }
+  .connect .row { display: flex; gap: 8px; }
+  .connect .row input { flex: 1; min-width: 0; }
+  .connect .err:empty { display: none; }
 
   h2 { font-size: 14px; font-weight: 500; margin: 0 0 12px; }
   .list { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; margin-bottom: 48px; }
@@ -94,6 +107,8 @@
   @media (max-width: 560px) {
     .stats { grid-template-columns: 1fr; }
     .item { flex-wrap: wrap; }
+    .connect .row { flex-direction: column; }
+    .connect .row input { flex: none; }
   }
 </style>
 </head>

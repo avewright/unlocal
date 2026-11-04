@@ -1,0 +1,28 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      # The commands in the README have to work on a clean checkout, not just in tests.
+      - name: Plan and deploy the example
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          cp -R examples/fullstack/. "$work"
+          pnpm --silent unlocal --dir "$work" plan --json > /dev/null
+          pnpm --silent unlocal --dir "$work" up --sim --json > /dev/null
