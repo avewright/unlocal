@@ -30,6 +30,12 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/control:
+    dependencies:
+      '@unlocal/core':
+        specifier: workspace:*
+        version: link:../core
+
   packages/core:
     dependencies:
       '@aws-sdk/client-cloudfront':
