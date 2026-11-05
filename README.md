@@ -9,7 +9,7 @@ unlocal cap 10                  # account-wide ceiling across every project (set
 unlocal plan                    # what changes, what it costs, budget headroom
 unlocal apply --yes             # deploy (--sim to simulate)
 unlocal status                  # URLs, connection info, spend
-unlocal connect aws             # connect AWS once, permanently, through a role limited to unlocal's resources
+unlocal connect aws             # connect AWS once: a role scoped to unlocal's S3 buckets (CloudFront is account-wide for now)
 unlocal guard                   # check burn and runway; pauses everything before money runs out
 unlocal freeze                  # kill switch: take everything offline, freeze deploys
 unlocal console                 # add funds, set the cap, connect clouds, see spending
@@ -52,6 +52,7 @@ What the cap does and doesn't do today:
 - Spend is the priced plan plus usage the cloud measures (Cloudflare Worker requests for services; static sites are free). Egress, storage growth and other clouds' usage aren't measured yet.
 - The cap, wallet and guard are local files and processes. They stop a cooperative or confused agent: raising the cap or unfreezing needs a typed confirmation at a real terminal. An agent determined to edit `~/.unlocal` by hand isn't stopped. That takes the hosted control plane (below).
 - The guard runs while `unlocal console` is open, or when `unlocal guard` runs. Nothing watches spend while neither is running.
+- The AWS connection is scoped to `unlocal-*` S3 buckets, but its CloudFront permissions are account-wide until tag conditions are verified: it can read or change other CloudFront distributions in that account. The hosted per-tenant role is the fix; until then, don't treat AWS as fully isolated.
 
 The hosted control plane is in [packages/control](packages/control): tenants, hashed tokens, encrypted
 cloud credentials, and `POST /v1/deploy` / `GET /v1/usage` with a deploy queue per project. It's a
