@@ -37,6 +37,8 @@ export interface Transaction {
 export interface Account {
   version: 1;
   monthlyCapUsd: number | null;
+  /** The most all projects together may spend in a day: a speed limit, so a runaway can't drain the month's cap in an afternoon. */
+  dailyLimitUsd?: number | null;
   balanceUsd: number;
   /** Keyed by absolute project directory. */
   projects: Record<string, LedgerEntry>;
@@ -64,6 +66,10 @@ export interface CapStatus {
   balanceUsd: number;
   /** The balance covers a full month of projectedUsd. */
   funded: boolean;
+  /** projectedUsd as a daily pace, and the account's per-day limit (null: none set). */
+  projectedPerDayUsd: number;
+  dailyLimitUsd: number | null;
+  withinDailyLimit: boolean;
 }
 
 export const MAX_CAP_USD = 100_000;
@@ -151,5 +157,8 @@ export function capStatus(account: Account, projectDir: string, projectMonthlyUs
     withinCap: projected <= account.monthlyCapUsd,
     balanceUsd: account.balanceUsd,
     funded: projected <= account.balanceUsd,
+    projectedPerDayUsd: round2(projected / 30),
+    dailyLimitUsd: account.dailyLimitUsd ?? null,
+    withinDailyLimit: account.dailyLimitUsd == null || projected / 30 <= account.dailyLimitUsd,
   };
 }

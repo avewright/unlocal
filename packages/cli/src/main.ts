@@ -14,12 +14,14 @@ import {
   VERSION,
   checkBudget,
   assess,
+  spendReport,
   createPlan,
   runGuard,
   settledAccount,
   stopEverything,
   unfreezeAccount,
   type GuardStatus,
+  type SpendReport,
   type PausedProject,
   defaultProjectName,
   up,
@@ -71,6 +73,8 @@ const OPTIONS = {
   "dry-run": { type: "boolean", default: false },
   "skip-build": { type: "boolean", default: false },
   template: { type: "boolean", default: false },
+  "per-day": { type: "string" },
+  watch: { type: "boolean", default: false },
   project: { type: "string" },
   budget: { type: "string" },
   port: { type: "string" },
@@ -92,6 +96,8 @@ interface Flags {
   "dry-run": boolean;
   "skip-build": boolean;
   template: boolean;
+  "per-day"?: string;
+  watch: boolean;
   project?: string;
   budget?: string;
   port?: string;
@@ -371,11 +377,25 @@ const COMMANDS: Record<string, Command> = {
   },
 
   cap: {
-    summary: "Show or set the account-wide monthly spending cap (humans only)",
+    summary: "Show or set the account-wide spending cap, per month and per day (humans only)",
     args: "[usd]",
-    flags: [],
+    flags: ["--per-day <usd>  the most all projects may spend in a day"],
     async run(ctx) {
       let account = await settledAccount(ctx.env);
+      if (ctx.flags["per-day"] !== undefined) {
+        const value = Number(ctx.flags["per-day"]);
+        if (!Number.isFinite(value) || value <= 0 || value > MAX_CAP_USD) {
+          throw new UnlocalError("USAGE", `--per-day must be a number between 0 and ${MAX_CAP_USD}`, { hint: "e.g. `unlocal cap --per-day 5`" });
+        }
+        // Same rule as the monthly cap: lowering is always allowed, setting or raising takes a person.
+        if (account.dailyLimitUsd == null || value > account.dailyLimitUsd) {
+          await confirmByHuman(`Type ${value} to limit spending to ${usd(value)}/day: `, String(value));
+        }
+        account = await withAccount(ctx.env, (a) => {
+          a.dailyLimitUsd = value;
+          return a;
+        });
+      }
       if (ctx.args[0] !== undefined) {
         const value = Number(ctx.args[0]);
         if (!Number.isFinite(value) || value <= 0 || value > MAX_CAP_USD) {
@@ -396,6 +416,7 @@ const COMMANDS: Record<string, Command> = {
         .sort((a, b) => b.monthlyUsd - a.monthlyUsd);
       const data = {
         monthlyCapUsd: account.monthlyCapUsd,
+        dailyLimitUsd: account.dailyLimitUsd ?? null,
         liveMonthlyUsd: committed,
         headroomUsd: account.monthlyCapUsd === null ? null : round2(account.monthlyCapUsd - committed),
         projects,
@@ -412,8 +433,32 @@ const COMMANDS: Record<string, Command> = {
         for (const p of projects) lines.push(`  ${p.project.padEnd(w)}  ${where(p).padEnd(cw)}  ${usd(p.monthlyUsd).padStart(mw)}/mo`);
       }
       if (account.monthlyCapUsd !== null) lines.push("", `  ${usd(committed)}/mo live · ${usd(data.headroomUsd!)} left`);
+      if (data.dailyLimitUsd !== null) lines.push(`  at most ${usd(data.dailyLimitUsd)}/day`);
       lines.push(...guardLines(data.guard));
       return { data, human: lines.join("\n") };
+    },
+  },
+
+  spend: {
+    summary: "Where the money is going: spent this month, the pace right now, and the limits",
+    flags: ["--watch  refresh every minute, and pause projects the moment a limit is crossed"],
+    async run(ctx) {
+      if (!ctx.flags.watch) {
+        const report = spendReport(await settledAccount(ctx.env));
+        return { data: report, human: renderSpend(report) };
+      }
+      if (ctx.flags.json) throw new UnlocalError("USAGE", "--watch is for people; agents run `unlocal spend --json` or `unlocal guard --json`");
+      // Each tick is a guard run: it reads what the clouds measured, then enforces the limits.
+      for (;;) {
+        const r = await runGuard(ctx.env);
+        const report = spendReport(await loadAccount(ctx.env));
+        const extra = [
+          ...(r.metered?.errors ?? []).map((e) => `  ! couldn't read ${e.project}'s usage: ${e.error}`),
+          ...pausedLines(r.paused),
+        ];
+        ctx.progress(`\x1b[2J\x1b[H${renderSpend(report)}${extra.length ? `\n${extra.join("\n")}` : ""}\n\nChecked ${new Date().toLocaleTimeString()} · every minute · Ctrl-C to stop`);
+        await new Promise((resolve) => setTimeout(resolve, 60_000));
+      }
     },
   },
 
@@ -535,6 +580,29 @@ async function confirmByHuman(prompt: string, expected: string): Promise<void> {
   } finally {
     rl.close();
   }
+}
+
+function renderSpend(r: SpendReport): string {
+  const month = new Date(`${r.month}-01T00:00:00Z`).toLocaleString("en-US", { month: "long", timeZone: "UTC" });
+  const day = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric" });
+  const lines = [
+    `${month.padEnd(10)}  ${usd(r.spentUsd)}${r.monthlyCapUsd !== null ? ` of ${usd(r.monthlyCapUsd)} cap` : " spent"}`,
+    `${"Right now".padEnd(10)}  ${usd(r.perDayUsd)}/day${r.dailyLimitUsd !== null ? ` of ${usd(r.dailyLimitUsd)}/day limit` : ""}`,
+  ];
+  if (r.lastHourPerDayUsd > r.perDayUsd * 1.5 && r.lastHourPerDayUsd >= 0.5) lines.push(`${"".padEnd(10)}  ▲ last hour is running at ${usd(r.lastHourPerDayUsd)}/day`);
+  if (r.capReachedAt) lines.push(`${"".padEnd(10)}  at this pace the cap is hit ${day(r.capReachedAt)}`);
+  lines.push(`${"Balance".padEnd(10)}  ${usd(r.balanceUsd)}`);
+  const shown = r.projects.filter((p) => p.cloud !== "sim");
+  if (shown.length) {
+    const w = Math.max(...shown.map((p) => p.project.length));
+    const cw = Math.max(...shown.map((p) => p.cloud.length));
+    lines.push("", ...shown.map((p) => {
+      const today = p.plannedPerDayUsd + p.measuredLastDayUsd;
+      return `  ${p.project.padEnd(w)}  ${p.cloud.padEnd(cw)}  ${today === 0 ? "free" : `${usd(today)}/day`}`;
+    }));
+  }
+  if (r.monthlyCapUsd === null) lines.push("", "No cap yet: only free deploys run. A human sets one with `unlocal cap <usd>`.");
+  return [...lines, ...guardLines(r.guard)].join("\n");
 }
 
 function guardLines(s: GuardStatus): string[] {

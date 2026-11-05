@@ -34,11 +34,17 @@ claude mcp add unlocal -- node /path/to/unlocal/packages/cli/bin/unlocal.js mcp
 
 Running resources are charged to the prepaid balance as time passes. The guard (`unlocal guard`, and every 5 minutes while the console is open) reads `data.status.level`:
 
-- `warn`: this month is on track for 80% of the cap, or the balance lasts under 7 days.
-- `pause`: this month's spend reached the cap, or the balance lasts under a day. Every live site and service is taken offline (databases are always kept) and deploys freeze. Where the cloud can pause (Cloudflare: the Worker and its files stay; only its workers.dev address is turned off) `data.paused[].how` is `"paused"` and the resource's state carries `paused`; elsewhere it's `"deleted"`. The next apply resumes paused resources as an update with `changes: ["paused"]`.
+- `warn`: this month is on track for 80% of the cap, the balance lasts under 7 days, or spending is at 80% of the per-day limit.
+- `pause`: this month's spend reached the cap, the balance lasts under a day, or spending is running faster than the per-day limit. Every live site and service is taken offline (databases are always kept) and deploys freeze. Where the cloud can pause (Cloudflare: the Worker and its files stay; only its workers.dev address is turned off) `data.paused[].how` is `"paused"` and the resource's state carries `paused`; elsewhere it's `"deleted"`. The next apply resumes paused resources as an update with `changes: ["paused"]`.
 - More than 50 live deploys in an hour also freezes deploys.
 
-While frozen, live applies fail with `ACCOUNT_FROZEN`. Destroying still works, since it only lowers spend. `unlocal freeze` is the kill switch. Only a human runs `unlocal unfreeze`; after that, `unlocal apply --yes` restores paused projects from the unchanged `unlocal.json`. `unlocal cap --json` includes `balanceUsd` and the guard status.
+While frozen, live applies fail with `ACCOUNT_FROZEN`. Destroying still works, since it only lowers spend. `unlocal freeze` is the kill switch. Only a human runs `unlocal unfreeze`; after that, `unlocal apply --yes` restores paused projects from the unchanged `unlocal.json`. `unlocal cap --json` includes `balanceUsd`, `dailyLimitUsd` and the guard status.
+
+The per-day limit (`unlocal cap --per-day <usd>`, humans only to set or raise it) is a speed limit across all projects, so a runaway can't spend the month's cap in an afternoon. A live apply whose priced plans add up to more than it per day fails with `CAP_EXCEEDED`; the guard pauses when the measured pace passes it.
+
+### Spend
+
+`unlocal spend --json` answers "where is the money going" without changing anything: `spentUsd` this month, `monthlyCapUsd`, `perDayUsd` (the pace now), `lastHourPerDayUsd`, `dailyLimitUsd`, `capReachedAt` (null if the cap won't be hit this month), `balanceUsd`, `projects[]` with `plannedPerDayUsd` and `measuredLastDayUsd`, and `guard`. `unlocal spend --watch` is for people: it runs the guard every minute and redraws.
 
 ### Metering
 

@@ -32,6 +32,10 @@ Checked items are done and committed. Who: **O** = Opus (core, CLI, console), **
 ## Then: the one-stop shop
 
 - [x] **O** Permanent AWS connection: `unlocal connect aws`, a role limited to unlocal's resources, renewed automatically
+- [x] **O** Per-day spending limit (`unlocal cap --per-day`) and `unlocal spend [--watch]`
+- [ ] **you** First real AWS deploy: create the unlocal stack, `unlocal connect aws`, one test site (pennies), then destroy
+- [ ] **O** AWS spend screen covers the whole account (CloudWatch estimated charges, free), not just unlocal's resources
+- [ ] **O** Hard maximums on every resource unlocal creates, so the worst case is known before deploy
 - [ ] **O** Narrow the role's CloudFront access to unlocal-tagged distributions, once tag conditions are verified
 - [ ] **O** "Connect AWS" button in the console (CloudFormation quick-create link)
 

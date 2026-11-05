@@ -9,6 +9,7 @@ import { round2 } from "./pricing.ts";
  *   warn   this month is projected past 80% of the cap, or the balance lasts < 7 days
  *   pause  this month has reached the cap, or the balance lasts < 1 day:
  *          live sites and services go offline (databases never), and deploys freeze
+ *          or spending is running faster than the account's per-day limit
  *   freeze more than 50 live deploys in an hour (a runaway agent)
  *
  * Burn is each project's priced plan plus usage the cloud measured (meter.ts), at the
@@ -81,7 +82,12 @@ export function meteredPerDay(account: Account, now: Date): { lastHour: number; 
     const recent = (account.meterLog ?? []).filter((e) => Date.parse(e.to) > start);
     if (!recent.length) return 0;
     const covered = Math.max(15 * 60_000, now.getTime() - Math.max(start, Math.min(...recent.map((e) => Date.parse(e.from)))));
-    return (recent.reduce((s, e) => s + e.usd, 0) * DAY_MS) / covered;
+    // A read can span hours (catching up after a laptop slept): count only its share inside the window.
+    const inWindow = recent.reduce((s, e) => {
+      const from = Date.parse(e.from), to = Date.parse(e.to);
+      return s + (to > from ? (e.usd * (to - Math.max(from, start))) / (to - from) : e.usd);
+    }, 0);
+    return (inWindow * DAY_MS) / covered;
   };
   return { lastHour: rate(3_600_000), lastDay: rate(DAY_MS) };
 }
@@ -98,6 +104,8 @@ export interface GuardStatus {
   frozen: NonNullable<Account["frozen"]> | null;
   /** The part of burnPerDayUsd the cloud measured, rather than estimated from prices. */
   meteredPerDayUsd: number;
+  /** The account's per-day speed limit; null when none is set. */
+  dailyLimitUsd: number | null;
 }
 
 export function assess(account: Account, now: Date = new Date()): GuardStatus {
@@ -128,6 +136,10 @@ export function assess(account: Account, now: Date = new Date()): GuardStatus {
     warn.push(`the balance lasts about ${Math.floor(runway)} days at ${usd(burn)}/day`);
   }
 
+  const limit = account.dailyLimitUsd ?? null;
+  if (limit !== null && burn > limit) pause.push(`spending ${usd(burn)}/day, over the ${usd(limit)}/day limit`);
+  else if (limit !== null && burn > 0 && burn >= limit * GUARD.warnCapRatio) warn.push(`spending ${usd(burn)}/day, close to the ${usd(limit)}/day limit`);
+
   // The last day includes the last hour, so with no history before it the two are equal: no spike.
   if (metered.lastHour >= GUARD.spikeMinPerDayUsd && metered.lastHour >= GUARD.spikeRatio * metered.lastDay) {
     warn.push(`usage spiked: the last hour is running at ${usd(metered.lastHour)}/day`);
@@ -142,6 +154,7 @@ export function assess(account: Account, now: Date = new Date()): GuardStatus {
     projectedMonthUsd: round2(projected),
     frozen: account.frozen ?? null,
     meteredPerDayUsd: round2(meteredBurn),
+    dailyLimitUsd: limit,
   };
 }
 

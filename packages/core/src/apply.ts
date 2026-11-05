@@ -68,6 +68,13 @@ export function assertApplicable(plan: Plan, state: ProjectState, options: Guard
         { details: plan.cap, hint: "shrink resources, or a human raises it with `unlocal cap <usd>`" },
       );
     }
+    if (!plan.cap.withinDailyLimit) {
+      throw new UnlocalError(
+        "CAP_EXCEEDED",
+        `all projects would spend ${usd(plan.cap.projectedPerDayUsd)}/day, over the ${usd(plan.cap.dailyLimitUsd!)}/day limit`,
+        { details: plan.cap, hint: "shrink resources, or a human raises it with `unlocal cap --per-day <usd>`" },
+      );
+    }
     if (!plan.cap.funded) {
       throw new UnlocalError(
         "FUNDS_INSUFFICIENT",

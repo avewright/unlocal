@@ -9,6 +9,7 @@ import {
   CLOUDS,
   bucketName,
   capStatus,
+  spendReport,
   creditAccount,
   distributionConfig,
   createAwsProvider,
@@ -310,6 +311,10 @@ describe("account cap", () => {
     await assert.rejects(applyPlan(broke, emptyState("demo"), opts), { code: "FUNDS_INSUFFICIENT" });
     const ok = createPlan(cfg, emptyState("demo"), { cap: (m) => capStatus(account(100), "/me", m) });
     assert.equal((await applyPlan(ok, emptyState("demo"), opts)).applied.length, 1);
+    // $30/mo already live is $1/day: a $1/day limit leaves no room for more.
+    const slow = { ...account(100), dailyLimitUsd: 1 };
+    const fast = createPlan(cfg, emptyState("demo"), { cap: (m) => capStatus(slow, "/me", m) });
+    await assert.rejects(applyPlan(fast, emptyState("demo"), opts), { code: "CAP_EXCEEDED", message: /\/day limit/ });
   });
 });
 
@@ -612,6 +617,36 @@ describe("metering", () => {
   it("pauses a free deploy the moment it starts costing money", () => {
     const free = base({ monthlyCapUsd: null, balanceUsd: 0, meterLog: [{ project: "a", from: hours(-1).toISOString(), to: t0.toISOString(), usd: 0.001 }] });
     assert.equal(assess(free, t0).level, "pause");
+  });
+
+  it("pauses when spending runs faster than the per-day limit, however much of the month is left", () => {
+    // The $108-in-a-day case: plenty of cap and balance, but far too fast.
+    const runaway = base({ monthlyCapUsd: 500, balanceUsd: 500, dailyLimitUsd: 10, meterLog: [{ project: "a", from: hours(-1).toISOString(), to: t0.toISOString(), usd: 4.5 }] });
+    const s = assess(runaway, t0);
+    assert.equal(s.level, "pause");
+    assert.match(s.reasons[0]!, /\$108\.00\/day, over the \$10\.00\/day limit/);
+    const near = base({ balanceUsd: 500, monthlyCapUsd: 500, dailyLimitUsd: 10, meterLog: [{ project: "a", from: hours(-24).toISOString(), to: t0.toISOString(), usd: 9 }] });
+    assert.equal(assess(near, t0).level, "warn");
+    assert.equal(assess({ ...near, dailyLimitUsd: null }, t0).level, "ok");
+  });
+
+  it("reports spend: this month, the pace now, each project, and when the cap is hit", () => {
+    const a = base({
+      monthlyCapUsd: 50, balanceUsd: 30, dailyLimitUsd: 5,
+      transactions: [{ id: "c", kind: "charge", amountUsd: 20, at: t0.toISOString() }],
+      projects: {
+        "/api": { project: "api", cloud: "aws", monthlyUsd: 30, live: true, updatedAt: "" },
+        "/www": { project: "www", cloud: "cloudflare", monthlyUsd: 0, live: true, updatedAt: "" },
+      },
+      meterLog: [{ project: "www", from: hours(-24).toISOString(), to: t0.toISOString(), usd: 1 }],
+    });
+    const r = spendReport(a, t0);
+    assert.equal(r.spentUsd, 20);
+    assert.equal(r.perDayUsd, 2, "$1/day planned + $1/day measured");
+    assert.equal(r.dailyLimitUsd, 5);
+    assert.deepEqual(r.projects.map((p) => [p.project, p.plannedPerDayUsd, p.measuredLastDayUsd]), [["api", 1, 0], ["www", 0, 1]]);
+    assert.equal(r.capReachedAt, new Date(t0.getTime() + 15 * 86_400_000).toISOString(), "$30 of room at $2/day");
+    assert.equal(spendReport({ ...a, monthlyCapUsd: 500 }, t0).capReachedAt, null, "not this month");
   });
 
   it("warns on a spike against the day's pace", () => {

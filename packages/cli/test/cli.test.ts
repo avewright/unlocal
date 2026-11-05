@@ -190,6 +190,29 @@ describe("unlocal CLI (agent contract)", () => {
     assert.deepEqual(cli(dir, ["cap"]).body.data.projects, []);
   });
 
+  it("limits spending per day; only a person sets or raises it, anyone lowers it", () => {
+    const dir = project(fullstack);
+    fund(dir, 100, 100);
+    assert.equal(cli(dir, ["cap", "--per-day", "5"]).body.error.code, "HUMAN_REQUIRED");
+    assert.equal(cli(dir, ["cap", "--per-day", "-1"]).code, 64);
+    const file = path.join(dir, ".home", "account.json");
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), dailyLimitUsd: 5 }));
+    assert.equal(cli(dir, ["cap", "--per-day", "9"]).body.error.code, "HUMAN_REQUIRED", "or raise it");
+    assert.equal(cli(dir, ["cap", "--per-day", "2"]).body.data.dailyLimitUsd, 2);
+  });
+
+  it("shows where the money is going", () => {
+    const dir = project(fullstack);
+    fund(dir, 30, 50);
+    const r = cli(dir, ["spend"]);
+    assert.equal(r.code, 0);
+    assert.equal(r.body.data.monthlyCapUsd, 50);
+    assert.equal(r.body.data.balanceUsd, 30);
+    assert.equal(r.body.data.perDayUsd, 0);
+    assert.equal(r.body.data.guard.level, "ok");
+    assert.equal(cli(dir, ["spend", "--watch"]).body.error.code, "USAGE", "watching is for people");
+  });
+
   it("redeploys when site files change", () => {
     const dir = project(fullstack);
     cli(dir, ["apply", "--yes"]);

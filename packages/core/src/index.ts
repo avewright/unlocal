@@ -21,6 +21,7 @@ export * from "./project.ts";
 export * from "./credentials.ts";
 export * from "./up.ts";
 export * from "./guard.ts";
+export * from "./spend.ts";
 export * from "./providers/provider.ts";
 export * from "./providers/sim.ts";
 export * from "./providers/aws.ts";
