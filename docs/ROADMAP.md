@@ -21,6 +21,7 @@ Checked items are done and committed. Who: **O** = Opus (core, CLI, console), **
 - [ ] **you** Publish to npm (needs your npm account)
 - [ ] **you** Pick and buy the free-link domain (e.g. `unlocal.app`) and add it to Cloudflare
 - [x] **C** Hosted API: tenants, hashed tokens, encrypted cloud credentials, `POST /v1/deploy`, `GET /v1/usage`, a deploy queue per project
+- [x] **C** Remote deploy client (`unlocal-control remote`) so the API is usable before `up --remote` lands
 - [ ] **C** Free links: deploys with no account go to `<name>.unlocal.app` on our Cloudflare account
 - [ ] **C** Beta hardening: TLS, a real database, rate limits, request logs, and the always-on guard/meter loop
 - [ ] **C** Admin CLI/console for tenant creation, funds and credential reconnect (curl is fine for now)

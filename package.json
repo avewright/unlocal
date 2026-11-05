@@ -9,6 +9,7 @@
     "dev": "node apps/www/serve.ts",
     "unlocal": "node packages/cli/bin/unlocal.js",
     "control": "node packages/control/bin/control.js",
+    "control:remote": "node packages/control/bin/control.js remote",
     "test": "node --test \"packages/*/test/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json",
     "check": "pnpm typecheck && pnpm test",

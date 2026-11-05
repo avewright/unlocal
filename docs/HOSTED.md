@@ -77,6 +77,16 @@ curl -s -X POST localhost:4401/v1/deploy \
 curl -s localhost:4401/v1/usage -H "authorization: Bearer <ul_ tenant token>"
 ```
 
+Or deploy a built folder with the client, which builds, packs and posts it:
+
+```bash
+UNLOCAL_CONTROL_URL=http://127.0.0.1:4401 UNLOCAL_CONTROL_TOKEN=<ul_ tenant token> \
+pnpm control:remote ./site
+```
+
+`unlocal up --remote` will fold this into the main CLI; until then `unlocal-control remote` is the
+shortest path from a folder to a live link.
+
 Beta boundaries: binds to `127.0.0.1`, keeps tenants in one JSON file (`UNLOCAL_CONTROL_DATA`), and
 has no TLS, rate limiting or multi-process support. Don't expose it publicly yet. Losing
 `UNLOCAL_CONTROL_SECRET` makes stored cloud credentials unreadable; the tenant reconnects.
