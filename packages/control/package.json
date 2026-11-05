@@ -6,6 +6,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "bin": {
+    "unlocal-control": "./bin/control.js"
+  },
   "dependencies": {
     "@unlocal/core": "workspace:*"
   }

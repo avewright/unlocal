@@ -9,7 +9,7 @@ Agent-first CLI and platform for deploying to Cloudflare, AWS, Google Cloud, Azu
 - `pnpm unlocal mcp`: MCP server over stdio (cli/src/mcp.ts); its tools wrap CLI commands, and none may set the cap or allow data loss
 - `pnpm unlocal console`: the console at http://127.0.0.1:4400 (add funds, set cap, deploy; `--login` requires an account). Code in packages/console; payments use Stripe Checkout when STRIPE_SECRET_KEY is set (use sk_test_ keys), otherwise instant test credit.
 - `pnpm www`: preview the website (apps/www/public) at http://localhost:4321. It's one static HTML file with no JS or web fonts, and unlocal deploys it via apps/www/unlocal.json. Its terminal block must stay real CLI output.
-- `packages/control`: the hosted deploy core (validate a bundle → tenant project dir → `up()`); see docs/HOSTED.md. The HTTP layer, tenant tokens and Stripe subscriptions come next; keep it out of core.
+- `pnpm control`: the hosted control plane's API (packages/control) on 127.0.0.1:4401; needs `UNLOCAL_CONTROL_ADMIN` and, to store cloud credentials, `UNLOCAL_CONTROL_SECRET`. See docs/HOSTED.md. Tenant tokens can deploy and read usage only; never add an endpoint that sets the cap, adds funds, unfreezes or deletes data.
 
 ## Conventions
 - Node runs `.ts` directly (type stripping). Only erasable TS syntax: no enums, namespaces or constructor parameter properties. Import with `.ts` extensions and use `import type` for types.

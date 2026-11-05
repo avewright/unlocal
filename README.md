@@ -49,8 +49,13 @@ Free deploys ($0, a site on Cloudflare) need no setup. Anything that costs money
 
 What the cap does and doesn't do today:
 - Spend is the priced plan plus usage the cloud measures (Cloudflare Worker requests for services; static sites are free). Egress, storage growth and other clouds' usage aren't measured yet.
-- The cap, wallet and guard are local files and processes. They stop a cooperative or confused agent: raising the cap or unfreezing needs a typed confirmation at a real terminal. An agent determined to edit `~/.unlocal` by hand isn't stopped. That takes the hosted account, still to come.
+- The cap, wallet and guard are local files and processes. They stop a cooperative or confused agent: raising the cap or unfreezing needs a typed confirmation at a real terminal. An agent determined to edit `~/.unlocal` by hand isn't stopped. That takes the hosted control plane (below).
 - The guard runs while `unlocal console` is open, or when `unlocal guard` runs. Nothing watches spend while neither is running.
+
+The hosted control plane is in [packages/control](packages/control): tenants, hashed tokens, encrypted
+cloud credentials, and `POST /v1/deploy` / `GET /v1/usage` with a deploy queue per project. It's a
+localhost beta for now; see [docs/HOSTED.md](docs/HOSTED.md). The agent holds a tenant token, never
+the cloud credential, and no tenant endpoint can raise the cap, add funds, unfreeze or delete data.
 
 ## Development
 

@@ -69,7 +69,7 @@ export async function deploySite(input: DeployInput): Promise<DeployResult> {
   await writeBundle(path.join(input.projectDir, PUBLIC_DIR), files);
   await writeFile(path.join(input.projectDir, "unlocal.json"), `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
 
-  const result = await up(input.projectDir, input.env, { sim: input.sim ?? false });
+  const result = await up(input.projectDir, input.env, { sim: input.sim ?? false, build: false });
   return {
     project,
     url: result.url,

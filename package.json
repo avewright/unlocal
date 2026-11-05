@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "node apps/www/serve.ts",
     "unlocal": "node packages/cli/bin/unlocal.js",
+    "control": "node packages/control/bin/control.js",
     "test": "node --test \"packages/*/test/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json",
     "check": "pnpm typecheck && pnpm test",

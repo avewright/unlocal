@@ -20,8 +20,10 @@ Checked items are done and committed. Who: **O** = Opus (core, CLI, console), **
 - [x] **O** npm package ready: `npx unlocal up` and `npx unlocal mcp` work from any folder
 - [ ] **you** Publish to npm (needs your npm account)
 - [ ] **you** Pick and buy the free-link domain (e.g. `unlocal.app`) and add it to Cloudflare
-- [ ] **C** Hosted API: tenants, hashed tokens, encrypted cloud credentials, `POST /v1/deploy`, `GET /v1/usage`, a deploy queue per project
+- [x] **C** Hosted API: tenants, hashed tokens, encrypted cloud credentials, `POST /v1/deploy`, `GET /v1/usage`, a deploy queue per project
 - [ ] **C** Free links: deploys with no account go to `<name>.unlocal.app` on our Cloudflare account
+- [ ] **C** Beta hardening: TLS, a real database, rate limits, request logs, and the always-on guard/meter loop
+- [ ] **C** Admin CLI/console for tenant creation, funds and credential reconnect (curl is fine for now)
 - [ ] **O** `unlocal up --remote` and the MCP tool talk to the hosted API; the agent holds only an unlocal token
 - [ ] **X** Website: waitlist, the $100 story, the real live link
 - [ ] **you** Show it to 10 agent builders; note where they get stuck
