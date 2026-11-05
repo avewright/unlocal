@@ -76,6 +76,6 @@ unlocal status --json                         # data.resources.<name>.outputs.ur
 - Add `--allow-data-loss` without explicit human confirmation.
 - Expect plaintext secrets in outputs. Credentials appear as `secret://` references.
 
-Setting or raising the cap (`unlocal cap <usd>`) and `unlocal unfreeze` need an interactive terminal and a typed confirmation; without one they fail with `HUMAN_REQUIRED`. Lowering the cap works anywhere. `NAME_TAKEN` means the cloud already has something by that name that unlocal didn't make; rename the project or resource.
+Setting or raising the cap (`unlocal cap <usd>`), `unlocal unfreeze` and `unlocal connect aws` need an interactive terminal (and the first two a typed confirmation); without one they fail with `HUMAN_REQUIRED`. Lowering the cap works anywhere. `NAME_TAKEN` means the cloud already has something by that name that unlocal didn't make; rename the project or resource.
 
 One apply per project runs at a time. A second one waits up to 30 seconds, then fails with `BUSY`; once the first finishes, a plan made before it is stale (`PLAN_STALE`).

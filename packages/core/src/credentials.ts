@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { accountHome } from "./account.ts";
+import type { AwsConnection } from "./aws-connect.ts";
 import { UnlocalError } from "./errors.ts";
 
 /**
@@ -11,6 +12,8 @@ import { UnlocalError } from "./errors.ts";
  */
 export interface Credentials {
   cloudflare?: { apiToken: string; accountId: string };
+  /** A permanent AWS connection through the unlocal-deploy role (see aws-connect.ts). */
+  aws?: AwsConnection;
 }
 
 const credentialsFile = (env: NodeJS.ProcessEnv) => path.join(accountHome(env), "credentials.json");

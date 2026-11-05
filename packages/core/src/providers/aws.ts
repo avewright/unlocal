@@ -29,6 +29,8 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
+import { assumeRoleCredentials } from "../aws-connect.ts";
+import { loadCredentials } from "../credentials.ts";
 import { UnlocalError } from "../errors.ts";
 import { contentTypeFor, listSiteFiles } from "../files.ts";
 import type { Outputs } from "../state.ts";
@@ -120,18 +122,32 @@ const isMissing = (err: unknown) =>
 function authError(cause: unknown): UnlocalError {
   return new UnlocalError("CLOUD_AUTH", "AWS credentials are missing or expired", {
     cause,
-    hint: "a human runs `aws login` (or `aws configure`), then re-run",
+    hint: "a human connects AWS once with `unlocal connect aws` (it never expires), or runs `aws login`, then re-run",
   });
 }
 
-export function createAwsProvider(): Provider {
+/**
+ * Which credentials AWS calls use. Explicit AWS_* keys in the environment win (CI);
+ * then a connection a human made with `unlocal connect aws`, which never expires;
+ * otherwise the machine's own AWS login, as the AWS CLI would find it.
+ */
+export function awsCredentialsFor(env: NodeJS.ProcessEnv): { credentials?: ReturnType<typeof assumeRoleCredentials>; source: "env" | "connection" | "machine" } {
+  if (env.AWS_ACCESS_KEY_ID) return { source: "env" };
+  const connection = loadCredentials(env).aws;
+  if (connection) return { credentials: assumeRoleCredentials(connection), source: "connection" };
+  return { source: "machine" };
+}
+
+export function createAwsProvider(env: NodeJS.ProcessEnv = process.env): Provider {
+  const { credentials } = awsCredentialsFor(env);
+  const auth = credentials ? { credentials } : {};
   const s3Clients = new Map<string, S3Client>();
   const s3For = (region: string) => {
-    if (!s3Clients.has(region)) s3Clients.set(region, new S3Client({ region }));
+    if (!s3Clients.has(region)) s3Clients.set(region, new S3Client({ region, ...auth }));
     return s3Clients.get(region)!;
   };
-  const cf = new CloudFrontClient({ region: "us-east-1" });
-  const sts = new STSClient({ region: "us-east-1" });
+  const cf = new CloudFrontClient({ region: "us-east-1", ...auth });
+  const sts = new STSClient({ region: "us-east-1", ...auth });
   let accountId: string | undefined;
 
   async function account(): Promise<string> {

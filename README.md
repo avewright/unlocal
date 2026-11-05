@@ -9,6 +9,7 @@ unlocal cap 10                  # account-wide ceiling across every project (set
 unlocal plan                    # what changes, what it costs, budget headroom
 unlocal apply --yes             # deploy (--sim to simulate)
 unlocal status                  # URLs, connection info, spend
+unlocal connect aws             # connect AWS once, permanently, through a role limited to unlocal's resources
 unlocal guard                   # check burn and runway; pauses everything before money runs out
 unlocal freeze                  # kill switch: take everything offline, freeze deploys
 unlocal console                 # add funds, set the cap, connect clouds, see spending

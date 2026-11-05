@@ -363,6 +363,31 @@ describe("guard and kill switch", () => {
   });
 });
 
+describe("unlocal connect aws", () => {
+  it("prints the CloudFormation template, but only a person can connect", () => {
+    const dir = project();
+    const t = cli(dir, ["connect", "aws", "--template"]);
+    assert.equal(t.code, 0);
+    assert.equal(t.body.data.Resources.DeployRole.Properties.RoleName, "unlocal-deploy");
+    const r = cli(dir, ["connect", "aws"]);
+    assert.equal(r.code, 2);
+    assert.equal(r.body.error.code, "HUMAN_REQUIRED");
+    assert.equal(cli(dir, ["connect", "gcp"]).code, 64);
+  });
+
+  it("disconnect forgets the saved connection and keeps the others", () => {
+    const dir = project();
+    const home = path.join(dir, ".home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(path.join(home, "credentials.json"), JSON.stringify({
+      cloudflare: { apiToken: "t", accountId: "a" },
+      aws: { roleArn: "arn:aws:iam::123456789012:role/unlocal-deploy", accessKeyId: "AKIA", secretAccessKey: "x" },
+    }));
+    assert.equal(cli(dir, ["disconnect", "aws"]).code, 0);
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(path.join(home, "credentials.json"), "utf8"))), ["cloudflare"]);
+  });
+});
+
 describe("unlocal mcp", () => {
   const session = (dir: string, messages: object[]) => {
     const r = spawnSync(process.execPath, [BIN, "mcp", "--sim"], {

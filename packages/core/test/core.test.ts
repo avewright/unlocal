@@ -16,6 +16,9 @@ import {
   assess,
   recordDeploy,
   runGuard,
+  connectTemplate,
+  awsCredentialsFor,
+  assumeRoleCredentials,
   priceUsage,
   meterUsage,
   METER_LAG_MS,
@@ -658,6 +661,84 @@ describe("metering", () => {
     } finally {
       fake.close();
     }
+  });
+});
+
+describe("aws connection", () => {
+  const roleArn = "arn:aws:iam::123456789012:role/unlocal-deploy";
+  const policyStatements = () => {
+    const role = (connectTemplate() as any).Resources.DeployRole.Properties;
+    return role.Policies.flatMap((p: any) => p.PolicyDocument.Statement) as { Action: string[]; Resource: unknown }[];
+  };
+
+  it("the role can never touch IAM, and S3 only on unlocal's buckets", () => {
+    const actions = policyStatements().flatMap((st) => st.Action);
+    assert.ok(actions.length > 0);
+    assert.equal(actions.filter((a) => a.startsWith("iam:") || a.startsWith("organizations:") || a === "*").length, 0);
+    for (const st of policyStatements().filter((st) => st.Action.some((a) => a.startsWith("s3:")))) {
+      assert.match(JSON.stringify(st.Resource), /s3:::unlocal-\*/);
+    }
+  });
+
+  it("allows every AWS call the provider makes", () => {
+    const source = readFileSync(new URL("../src/providers/aws.ts", import.meta.url), "utf8");
+    const commands = [...new Set([...source.matchAll(/new (\w+)Command\(/g)].map((m) => m[1]!))];
+    // SDK command → IAM action, where the names differ.
+    const special: Record<string, string[]> = {
+      CreateDistributionWithTags: ["cloudfront:CreateDistribution", "cloudfront:TagResource"],
+      PutPublicAccessBlock: ["s3:PutBucketPublicAccessBlock"],
+      DeleteObjects: ["s3:DeleteObject"],
+      ListObjectsV2: ["s3:ListBucket"],
+      GetCallerIdentity: [], // needs no permission
+    };
+    const allowed = new Set(policyStatements().flatMap((st) => st.Action));
+    const service = (cmd: string) => (/Distribution|Invalidation|OriginAccess/.test(cmd) ? "cloudfront" : "s3");
+    const missing = commands.flatMap((cmd) => (special[cmd] ?? [`${service(cmd)}:${cmd}`]).filter((a) => !allowed.has(a)));
+    assert.deepEqual(missing, [], "add these to connectTemplate() in aws-connect.ts");
+    assert.ok(allowed.has("cloudfront:GetDistribution"), "the deploy waiter polls GetDistribution");
+  });
+
+  it("trusts hosted unlocal only with the customer's ExternalId, and the connector user can only assume the role", () => {
+    const t = connectTemplate() as any;
+    const [, hosted] = t.Resources.DeployRole.Properties.AssumeRolePolicyDocument.Statement[0]["Fn::If"].slice(1);
+    assert.deepEqual(hosted.Condition, { StringEquals: { "sts:ExternalId": { Ref: "ExternalId" } } });
+    const user = t.Resources.ConnectorUser;
+    assert.equal(user.Condition, "Local");
+    assert.deepEqual(user.Properties.Policies.flatMap((p: any) => p.PolicyDocument.Statement.map((st: any) => st.Action)), ["sts:AssumeRole"]);
+    assert.equal(t.Resources.DeployRole.Properties.MaxSessionDuration, 3600);
+  });
+
+  it("assumes the role once, renews it before it expires, and shares one renewal", async () => {
+    let clock = Date.parse("2026-11-05T12:00:00Z");
+    const calls: any[] = [];
+    const assume = async (input: any) => {
+      calls.push(input);
+      return { Credentials: { AccessKeyId: `AK${calls.length}`, SecretAccessKey: "s", SessionToken: "t", Expiration: new Date(clock + 3_600_000) } };
+    };
+    const creds = assumeRoleCredentials({ roleArn, externalId: "ul_1" }, { assume, now: () => clock });
+    const [a, b] = await Promise.all([creds(), creds()]);
+    assert.equal(calls.length, 1, "concurrent calls share one assume");
+    assert.equal(a.accessKeyId, "AK1");
+    assert.equal(b.accessKeyId, "AK1");
+    assert.equal(calls[0].ExternalId, "ul_1");
+    clock += 50 * 60_000;
+    assert.equal((await creds()).accessKeyId, "AK1", "still fresh at 50 minutes");
+    clock += 6 * 60_000;
+    assert.equal((await creds()).accessKeyId, "AK2", "renewed with 4 minutes left");
+  });
+
+  it("reports a revoked connection as CLOUD_AUTH with a way back", async () => {
+    const creds = assumeRoleCredentials({ roleArn }, { assume: async () => { throw new Error("AccessDenied"); } });
+    await assert.rejects(creds(), (err: any) => err.code === "CLOUD_AUTH" && /connect aws/.test(err.hint));
+    assert.throws(() => assumeRoleCredentials({ roleArn: "not-an-arn" }), { code: "USAGE" });
+  });
+
+  it("uses explicit AWS keys first, then the saved connection, then the machine's login", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "unlocal-aws-"));
+    assert.equal(awsCredentialsFor({ UNLOCAL_HOME: home }).source, "machine");
+    await saveCredentials({ aws: { roleArn, accessKeyId: "AKIA", secretAccessKey: "x" } }, { UNLOCAL_HOME: home });
+    assert.equal(awsCredentialsFor({ UNLOCAL_HOME: home }).source, "connection");
+    assert.equal(awsCredentialsFor({ UNLOCAL_HOME: home, AWS_ACCESS_KEY_ID: "AKIA2" }).source, "env");
   });
 });
 

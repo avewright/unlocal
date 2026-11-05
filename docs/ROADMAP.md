@@ -31,6 +31,10 @@ Checked items are done and committed. Who: **O** = Opus (core, CLI, console), **
 
 ## Then: the one-stop shop
 
+- [x] **O** Permanent AWS connection: `unlocal connect aws`, a role limited to unlocal's resources, renewed automatically
+- [ ] **O** Narrow the role's CloudFront access to unlocal-tagged distributions, once tag conditions are verified
+- [ ] **O** "Connect AWS" button in the console (CloudFormation quick-create link)
+
 - [ ] **O** Server code on Workers (an API next to the site), metered by requests
 - [ ] **O** Simple database: Cloudflare D1, created and connected by `up`, metered by rows written, rows read and storage; never deleted by a pause
 - [ ] **O** Secrets: `unlocal secret set KEY`, never shown back to the agent

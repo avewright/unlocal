@@ -50,6 +50,8 @@ CLI  ·  MCP server  ·  REST API  ·  console
 
 A type a cloud doesn't offer is a `CONFIG_INVALID` error naming what it does offer. Cloudflare credentials come from `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit, plus Account Analytics: Read for metering) and `CLOUDFLARE_ACCOUNT_ID`; every Worker unlocal deploys carries the `UNLOCAL_ASSETS` binding, and unlocal refuses to overwrite or delete a Worker without it.
 
+AWS connects once, permanently, through the `unlocal-deploy` role (`unlocal connect aws`; template in aws-connect.ts). It can only do what the AWS provider does, on `unlocal-*` S3 buckets and on CloudFront, and nothing in IAM; unlocal assumes it for an hour at a time and renews it itself, so nobody logs in again. Locally a `unlocal-connector` user that can only assume the role holds the key; hosted, the role trusts unlocal's account with the customer's ExternalId. Deleting the stack revokes everything. Explicit `AWS_*` keys in the environment win; without a connection unlocal uses the machine's AWS login.
+
 Credentials surface as `secret://` refs on every cloud. Prices marked "unverified" in clouds.ts (Oracle Postgres; Azure and Google larger database sizes) must be confirmed before launch.
 
 ## Roadmap

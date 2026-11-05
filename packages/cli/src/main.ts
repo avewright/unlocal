@@ -33,6 +33,13 @@ import {
   parseConfig,
   round2,
   withAccount,
+  CONNECTOR_USER,
+  ROLE_NAME,
+  assertRoleArn,
+  connectTemplate,
+  loadCredentials,
+  saveCredentials,
+  verifyAwsConnection,
   type ApplyEvent,
   type Cloud,
   type CostEstimate,
@@ -63,6 +70,7 @@ const OPTIONS = {
   "plan-id": { type: "string" },
   "dry-run": { type: "boolean", default: false },
   "skip-build": { type: "boolean", default: false },
+  template: { type: "boolean", default: false },
   project: { type: "string" },
   budget: { type: "string" },
   port: { type: "string" },
@@ -83,6 +91,7 @@ interface Flags {
   "plan-id"?: string;
   "dry-run": boolean;
   "skip-build": boolean;
+  template: boolean;
   project?: string;
   budget?: string;
   port?: string;
@@ -436,6 +445,47 @@ const COMMANDS: Record<string, Command> = {
     },
   },
 
+  connect: {
+    summary: "Connect AWS once, permanently (humans only); --template prints the CloudFormation template",
+    args: "aws",
+    flags: ["--template  print the template to run in CloudFormation"],
+    async run(ctx) {
+      if (ctx.args[0] !== "aws") throw new UnlocalError("USAGE", "only `unlocal connect aws` exists; Cloudflare connects in the console");
+      if (ctx.flags.template) return { data: connectTemplate(), human: JSON.stringify(connectTemplate(), null, 2) };
+      requireHuman();
+      process.stderr.write([
+        "1. In AWS CloudFormation, create a stack from the template (`unlocal connect aws --template > unlocal-aws.json`).",
+        "   Leave TrustedAccountId empty.",
+        `2. Open the stack's CreateConnectorKey output and create one access key for ${CONNECTOR_USER}.`,
+        "",
+      ].join("\n"));
+      const roleArn = (await ask("Role ARN (the stack's RoleArn output): ")).trim();
+      assertRoleArn(roleArn);
+      const accessKeyId = (await ask("Access key ID: ")).trim();
+      const secretAccessKey = (await ask("Secret access key (hidden): ", { secret: true })).trim();
+      if (!accessKeyId || !secretAccessKey) throw new UnlocalError("USAGE", "both parts of the access key are needed; nothing saved");
+      const connection = { roleArn, accessKeyId, secretAccessKey };
+      const me = await verifyAwsConnection(connection);
+      await saveCredentials({ ...loadCredentials(ctx.env), aws: connection }, ctx.env);
+      return {
+        data: { cloud: "aws", account: me.account, roleArn },
+        human: `Connected AWS account ${me.account} through ${ROLE_NAME}. It stays connected until you delete the stack.`,
+      };
+    },
+  },
+
+  disconnect: {
+    summary: "Forget the saved AWS connection (the stack in AWS stays until you delete it)",
+    args: "aws",
+    flags: [],
+    async run(ctx) {
+      if (ctx.args[0] !== "aws") throw new UnlocalError("USAGE", "only `unlocal disconnect aws` exists; Cloudflare disconnects in the console");
+      const { aws: _forgotten, ...rest } = loadCredentials(ctx.env);
+      await saveCredentials(rest, ctx.env);
+      return { data: { cloud: "aws", connected: false }, human: "Forgot the AWS connection. Delete the unlocal stack in CloudFormation to revoke it in AWS too." };
+    },
+  },
+
   unfreeze: {
     summary: "Allow deploys again after a freeze (humans only)",
     flags: [],
@@ -451,12 +501,33 @@ const COMMANDS: Record<string, Command> = {
  * Some commands need a person at a keyboard: they're refused without an interactive
  * terminal, which agents' shells don't have. A speed bump, not a security boundary.
  */
-async function confirmByHuman(prompt: string, expected: string): Promise<void> {
+function requireHuman(): void {
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
     throw new UnlocalError("HUMAN_REQUIRED", "only a person can do this, from an interactive terminal or the console", {
       hint: "ask the human to run this command themselves, or to use `unlocal console`",
     });
   }
+}
+
+/** One line from the person at the terminal; `secret` keeps what they type off the screen. */
+async function ask(question: string, options: { secret?: boolean } = {}): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
+  if (options.secret) {
+    const internal = rl as unknown as { _writeToOutput: (s: string) => void };
+    const write = internal._writeToOutput.bind(rl);
+    internal._writeToOutput = (s: string) => {
+      if (s.includes(question) || s === "\r\n" || s === "\n") write(s);
+    };
+  }
+  try {
+    return await rl.question(question).catch(() => "");
+  } finally {
+    rl.close();
+  }
+}
+
+async function confirmByHuman(prompt: string, expected: string): Promise<void> {
+  requireHuman();
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
     const answer = await rl.question(prompt).catch(() => ""); // Ctrl-C / Ctrl-D

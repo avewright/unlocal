@@ -15,6 +15,7 @@ export * from "./apply.ts";
 export * from "./account.ts";
 export * from "./meter.ts";
 export * from "./build.ts";
+export * from "./aws-connect.ts";
 export * from "./files.ts";
 export * from "./project.ts";
 export * from "./credentials.ts";
