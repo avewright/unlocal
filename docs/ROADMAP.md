@@ -10,8 +10,8 @@ Checked items are done and committed. Who: **O** = Opus (core, CLI, console), **
 - [x] **O** Guard pause takes the project state lock, like apply
 - [x] **O** Docs agree: ARCHITECTURE target is the hosted / own-cloud-account model; README Status says spend is metered and free deploys need no setup
 - [x] **O** Commit the metering and free-deploy work
-- [ ] **you** Say "go": first real deploy of the website to Cloudflare (`unlocal up`, $0)
-- [ ] **O** Fix whatever the real deploy shows; confirm metering reads real numbers
+- [x] **you** Say "go": first real deploy of the website to Cloudflare (`unlocal up`, $0)
+- [x] **O** Fix whatever the real deploy shows; confirm metering reads real numbers
 - [ ] **you** Push `guardrails-metering` and merge to `main`
 
 ## Next: anyone can use it

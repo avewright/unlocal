@@ -402,7 +402,7 @@ const COMMANDS: Record<string, Command> = {
         balanceUsd: account.balanceUsd,
         guard: assess(account),
       };
-      const lines = [account.monthlyCapUsd === null ? "No cap set. Real deploys are refused until one is: unlocal cap <usd>" : `Cap ${usd(account.monthlyCapUsd)}/mo`];
+      const lines = [account.monthlyCapUsd === null ? "No cap set. Free deploys work; anything that costs money needs one: unlocal cap <usd>" : `Cap ${usd(account.monthlyCapUsd)}/mo`];
       if (projects.length) {
         lines.push("");
         const where = (p: (typeof projects)[number]) => (p.live ? p.cloud : "sim");

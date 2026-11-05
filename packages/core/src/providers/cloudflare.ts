@@ -81,11 +81,19 @@ const isAuthError = (err: unknown) =>
   err instanceof CloudflareApiError && (err.status === 401 || err.status === 403 || err.codes.some((c) => AUTH_CODES.has(c)));
 const isMissing = (err: unknown) => err instanceof CloudflareApiError && err.status === 404;
 
+const PERMISSIONS = "Account → Workers Scripts → Edit, and Account → Account Analytics → Read";
+
 const authError = (cause?: unknown) =>
-  new UnlocalError("CLOUD_AUTH", "Cloudflare credentials are missing or don't work", {
-    cause,
-    hint: "a human connects Cloudflare in the console (`unlocal console`), or sets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID",
-  });
+  // A 403 with a working token means the token lacks a permission, not that it's wrong.
+  cause instanceof CloudflareApiError && cause.status === 403
+    ? new UnlocalError("CLOUD_AUTH", "the Cloudflare token works but isn't allowed to do this", {
+      cause,
+      hint: `a human edits the token in the Cloudflare dashboard (My Profile → API Tokens) to include ${PERMISSIONS}`,
+    })
+    : new UnlocalError("CLOUD_AUTH", "Cloudflare credentials are missing or don't work", {
+      cause,
+      hint: `a human connects Cloudflare in the console (\`unlocal console\`), or sets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (token permissions: ${PERMISSIONS})`,
+    });
 
 export interface CloudflareOptions {
   env?: NodeJS.ProcessEnv;
@@ -94,9 +102,27 @@ export interface CloudflareOptions {
   api?: string;
 }
 
+/**
+ * Retry requests that never got an answer (a dropped connection, a DNS blip). Every call
+ * unlocal makes is safe to repeat: uploads are keyed by content hash and deploys replace
+ * the whole Worker. HTTP errors are answers, so they're never retried.
+ */
+export function withRetries(doFetch: typeof fetch, delaysMs: number[] = [500, 2000, 5000]): typeof fetch {
+  return async (input, init) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await doFetch(input, init);
+      } catch (err) {
+        if (attempt >= delaysMs.length) throw err;
+        await new Promise((r) => setTimeout(r, delaysMs[attempt]));
+      }
+    }
+  };
+}
+
 export function createCloudflareProvider(options: CloudflareOptions = {}): Provider {
   const env = options.env ?? process.env;
-  const doFetch = options.fetch ?? fetch;
+  const doFetch = withRetries(options.fetch ?? fetch);
   const api = options.api ?? env.CLOUDFLARE_API_BASE ?? CLOUDFLARE_API;
   let subdomain: string | undefined;
 

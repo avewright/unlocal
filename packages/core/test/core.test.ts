@@ -17,6 +17,7 @@ import {
   recordDeploy,
   runGuard,
   connectTemplate,
+  withRetries,
   awsCredentialsFor,
   assumeRoleCredentials,
   priceUsage,
@@ -661,6 +662,27 @@ describe("metering", () => {
     } finally {
       fake.close();
     }
+  });
+});
+
+describe("cloudflare retries", () => {
+  it("retries a request that never got an answer, but never an HTTP error", async () => {
+    let calls = 0;
+    const flaky = (async () => {
+      calls++;
+      if (calls < 3) throw new TypeError("fetch failed");
+      return new Response("ok");
+    }) as typeof fetch;
+    assert.equal(await (await withRetries(flaky, [0, 0, 0])("http://x")).text(), "ok");
+    assert.equal(calls, 3);
+
+    let errors = 0;
+    const failing = (async () => (errors++, new Response("no", { status: 500 }))) as typeof fetch;
+    assert.equal((await withRetries(failing, [0, 0])("http://x")).status, 500);
+    assert.equal(errors, 1);
+
+    const down = (async () => { throw new TypeError("fetch failed"); }) as typeof fetch;
+    await assert.rejects(withRetries(down, [0, 0])("http://x"), /fetch failed/);
   });
 });
 
